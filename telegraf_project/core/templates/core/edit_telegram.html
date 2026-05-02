@@ -1,0 +1,40 @@
+﻿{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-4">
+    <div class="card">
+        <div class="card-header bg-white">
+            <h3 class="text-center">Редактирование телеграммы №{{ telegram.number|default:"—" }}</h3>
+        </div>
+        <div class="card-body">
+            <form method="post">
+                {% csrf_token %}
+                <div class="mb-3">
+                    <label class="form-label">Текст телеграммы</label>
+                    <textarea name="text" class="form-control" rows="6" required>{{ telegram.text }}</textarea>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Получатели</label>
+                    <select name="recipients" multiple class="form-select" size="5">
+                        {% for user in all_users %}
+                            <option value="{{ user.id }}" {% if user in telegram.recipients_users %}selected{% endif %}>{{ user.full_name|default:user.username }} ({{ user.department.name|default:"—" }})</option>
+                        {% endfor %}
+                    </select>
+                    <small class="text-muted">Удерживайте Ctrl для множественного выбора</small>
+                </div>
+                {% if telegram.requires_approval %}
+                <div class="mb-3">
+                    <label class="form-label">Подписанты</label>
+                    <select name="approvers" multiple class="form-select" size="5">
+                        {% for user in all_approvers %}
+                            <option value="{{ user.id }}" {% if user in telegram.approvers.all %}selected{% endif %}>{{ user.full_name|default:user.username }} ({{ user.department.name|default:"—" }})</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+                <button type="submit" class="btn btn-primary">Сохранить</button>
+                <a href="{% url 'telegram_journal' %}" class="btn btn-secondary">Отмена</a>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

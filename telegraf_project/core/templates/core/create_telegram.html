@@ -1,0 +1,208 @@
+﻿{% extends 'base.html' %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header bg-white">
+                <ul class="nav nav-tabs card-header-tabs" id="createTabs" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="create-tab" data-bs-toggle="tab" data-bs-target="#create" type="button" role="tab">Создание</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="templates-tab" data-bs-toggle="tab" data-bs-target="#templates" type="button" role="tab">Шаблоны</button>
+                    </li>
+                </ul>
+            </div>
+            <div class="card-body">
+                <div class="tab-content">
+                    <!-- Вкладка "Создание" -->
+                    <div class="tab-pane fade show active" id="create" role="tabpanel">
+                        <form method="post" id="telegramForm">
+                            {% csrf_token %}
+                            <div class="mb-3">
+                                <label class="form-label">Приоритет</label>
+                                <div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="radio" name="priority" id="normal" value="NORMAL" checked>
+                                        <label class="form-check-label" for="normal">Обычная</label>
+                                    </div>
+                                    <div class="form-check form-check-inline">
+                                        <input class="form-check-input" type="radio" name="priority" id="urgent" value="URGENT">
+                                        <label class="form-check-label" for="urgent">Срочная</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Подразделения</label>
+                                <div id="departments">
+                                    {% for dept in departments %}
+                                    <div class="form-check">
+                                        <input class="form-check-input dept-checkbox" type="checkbox" value="{{ dept.id }}" id="dept_{{ dept.id }}">
+                                        <label class="form-check-label" for="dept_{{ dept.id }}">
+                                            {{ dept.code }} - {{ dept.name }}
+                                        </label>
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                            </div>
+                            <div class="mb-3" id="recipients_block" style="display: none;">
+                                <label class="form-label">Получатели</label>
+                                <div id="recipients_checkboxes"></div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Текст телеграммы</label>
+                                <textarea name="text" id="telegramText" class="form-control" rows="5" required></textarea>
+                                <div class="mt-2">
+                                    <input type="file" id="wordFile" accept=".docx" style="display: none;">
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="uploadWordBtn">Загрузить из Word</button>
+                                </div>
+                            </div>
+                            <div class="mb-3 form-check">
+                                <input type="checkbox" class="form-check-input" id="requires_approval" name="requires_approval">
+                                <label class="form-check-label" for="requires_approval">Требуется подпись</label>
+                            </div>
+                            <div class="mb-3" id="approvers_block" style="display: none;">
+                                <label class="form-label">Подписанты</label>
+                                <div id="approvers_checkboxes"></div>
+                            </div>
+                            <button type="submit" class="btn btn-primary">Отправить</button>
+                            <a href="{% url 'telegram_journal' %}" class="btn btn-secondary">Отмена</a>
+                        </form>
+                    </div>
+
+                    <!-- Вкладка "Шаблоны" -->
+                    <div class="tab-pane fade" id="templates" role="tabpanel">
+                        <div class="mb-3">
+                            <label class="form-label">Выберите шаблон</label>
+                            <select class="form-select" id="templateSelect">
+                                <option value="">-- Выберите шаблон --</option>
+                                {% for template in templates %}
+                                    <option value="{{ template.id }}" data-text="{{ template.text|escapejs }}">{{ template.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <button type="button" class="btn btn-primary" id="applyTemplateBtn">Применить шаблон</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const deptCheckboxes = document.querySelectorAll('.dept-checkbox');
+    const recipientsBlock = document.getElementById('recipients_block');
+    const recipientsDiv = document.getElementById('recipients_checkboxes');
+    const approvalCheckbox = document.getElementById('requires_approval');
+    const approversBlock = document.getElementById('approvers_block');
+    const approversDiv = document.getElementById('approvers_checkboxes');
+
+    function updateRecipients() {
+        const selectedDepts = Array.from(deptCheckboxes)
+            .filter(cb => cb.checked)
+            .map(cb => cb.value);
+        if (selectedDepts.length === 0) {
+            recipientsBlock.style.display = 'none';
+            return;
+        }
+        fetch(`/get-recipients/?departments=${selectedDepts.join(',')}`)
+            .then(response => response.json())
+            .then(data => {
+                recipientsDiv.innerHTML = '';
+                data.forEach(user => {
+                    recipientsDiv.innerHTML += `
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="recipients" value="${user.id}" id="recipient_${user.id}">
+                            <label class="form-check-label" for="recipient_${user.id}">
+                                ${user.full_name || user.username}
+                            </label>
+                        </div>
+                    `;
+                });
+                recipientsBlock.style.display = 'block';
+            })
+            .catch(err => console.error('Ошибка загрузки получателей:', err));
+    }
+
+    function updateApprovers() {
+        if (!approvalCheckbox.checked) {
+            approversBlock.style.display = 'none';
+            return;
+        }
+        const selectedDepts = Array.from(deptCheckboxes)
+            .filter(cb => cb.checked)
+            .map(cb => cb.value);
+        if (selectedDepts.length === 0) {
+            approversBlock.style.display = 'none';
+            return;
+        }
+        fetch(`/get-approvers/?departments=${selectedDepts.join(',')}`)
+            .then(response => response.json())
+            .then(data => {
+                approversDiv.innerHTML = '';
+                data.forEach(user => {
+                    approversDiv.innerHTML += `
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" name="approvers" value="${user.id}" id="approver_${user.id}">
+                            <label class="form-check-label" for="approver_${user.id}">
+                                ${user.full_name || user.username} (${user.department_name || '—'})
+                            </label>
+                        </div>
+                    `;
+                });
+                approversBlock.style.display = 'block';
+            })
+            .catch(err => console.error('Ошибка загрузки подписантов:', err));
+    }
+
+    deptCheckboxes.forEach(cb => cb.addEventListener('change', () => {
+        updateRecipients();
+        if (approvalCheckbox.checked) updateApprovers();
+    }));
+    approvalCheckbox.addEventListener('change', () => {
+        if (approvalCheckbox.checked) updateApprovers();
+        else approversBlock.style.display = 'none';
+    });
+
+    // Шаблоны
+    document.getElementById('applyTemplateBtn').addEventListener('click', () => {
+        const select = document.getElementById('templateSelect');
+        const option = select.options[select.selectedIndex];
+        const text = option.getAttribute('data-text');
+        if (text) {
+            document.getElementById('telegramText').value = text;
+            const createTab = new bootstrap.Tab(document.getElementById('create-tab'));
+            createTab.show();
+        } else {
+            alert('Выберите шаблон');
+        }
+    });
+
+    // Загрузка из Word
+    document.getElementById('uploadWordBtn').addEventListener('click', () => {
+        document.getElementById('wordFile').click();
+    });
+    document.getElementById('wordFile').addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+            const response = await fetch("{% url 'upload_word' %}", {
+                method: 'POST',
+                body: formData,
+                headers: { 'X-CSRFToken': '{{ csrf_token }}' }
+            });
+            const data = await response.json();
+            if (data.error) {
+                alert(data.error);
+            } else {
+                document.getElementById('telegramText').value = data.text;
+            }
+        } catch (err) {
+            alert('Ошибка загрузки файла');
+        }
+        e.target.value = '';
+    });
+</script>
+{% endblock %}

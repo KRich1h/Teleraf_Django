@@ -1,0 +1,104 @@
+﻿{% extends 'base.html' %}
+{% block content %}
+<h2 class="h4 mb-3"><i class="bi bi-person-badge"></i> Модуль оператора — обслуживаемые подразделения</h2>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="get" class="row g-3 align-items-end">
+            <div class="col-md-2"><label>{{ form.start_date.label }}</label>{{ form.start_date }}</div>
+            <div class="col-md-2"><label>{{ form.end_date.label }}</label>{{ form.end_date }}</div>
+            <div class="col-md-2"><label>{{ form.number.label }}</label>{{ form.number }}</div>
+            <div class="col-md-2"><label>{{ form.department.label }}</label>{{ form.department }}</div>
+            <div class="col-md-2"><label>{{ form.status.label }}</label>{{ form.status }}</div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary w-100">Фильтр</button>
+                <a href="{% url 'operator_dashboard' %}" class="btn btn-secondary w-100 mt-2">Сбросить</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        {% if recipients %}
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>№</th>
+                        <th>Дата создания</th>
+                        <th>Отправитель</th>
+                        <th>Получатель</th>
+                        <th>Статус</th>
+                        <th>Время ожидания</th>
+                        <th>Уведомления</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in recipients %}
+                    <tr>
+                        <td>{{ item.telegram.number|default:"—" }}</td>
+                        <td>{{ item.telegram.created_at|date:"d.m.Y H:i" }}</td>
+                        <td>{{ item.telegram.author.full_name|default:item.telegram.author.username }}</td>
+                        <td>{{ item.user.full_name|default:item.user.username }}</td>
+                        <td>
+                            {% if item.status == 'READ' %}
+                                <span class="badge bg-success text-dark fw-bold">Прочитана</span>
+                            {% else %}
+                                <span class="badge bg-secondary text-dark fw-bold">Не прочитана</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ item.waiting_display }}</td>
+                        <td>
+                            {% if item.is_notified %}
+                                <a href="#" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#notifyModal" data-date="{{ item.last_notified_at|date:'d.m.Y H:i:s' }}" data-recipient="{{ item.user.full_name|default:item.user.username }}">Уведомлено</a>
+                            {% else %}
+                                <form method="post" class="d-inline">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="recipient_id" value="{{ item.id }}">
+                                    <input type="hidden" name="action" value="notify">
+                                    <button type="submit" class="btn btn-sm btn-warning">Уведомить</button>
+                                </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-muted text-center p-3">Нет телеграмм в обслуживаемых подразделениях.</div>
+        {% endif %}
+    </div>
+</div>
+<div class="mt-3">
+    <a href="{% url 'home' %}" class="btn btn-sm btn-secondary">На главную</a>
+</div>
+
+<div class="modal fade" id="notifyModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Информация об уведомлении</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <p><strong>Получатель:</strong> <span id="notifyRecipient"></span></p>
+                <p><strong>Дата уведомления:</strong> <span id="notifyDate"></span></p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const notifyModal = document.getElementById('notifyModal');
+    notifyModal.addEventListener('show.bs.modal', function(event) {
+        const button = event.relatedTarget;
+        document.getElementById('notifyRecipient').innerText = button.getAttribute('data-recipient');
+        document.getElementById('notifyDate').innerText = button.getAttribute('data-date');
+    });
+</script>
+{% endblock %}

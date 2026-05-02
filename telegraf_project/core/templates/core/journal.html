@@ -1,0 +1,166 @@
+﻿{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="h4 mb-0"><i class="bi bi-journal-bookmark-fill"></i> Журнал телеграмм</h2>
+    <div class="d-flex gap-2">
+        <button type="button" class="btn btn-outline-primary action-btn" id="viewSelectedBtn" title="Просмотр"><i class="bi bi-eye"></i></button>
+        <button type="button" class="btn btn-outline-secondary action-btn" id="editSelectedBtn" title="Редактировать"><i class="bi bi-pencil"></i></button>
+        <button type="button" class="btn btn-outline-danger action-btn" id="deleteSelectedBtn" title="Удалить"><i class="bi bi-trash"></i></button>
+        <button type="button" class="btn btn-outline-success action-btn" id="printSelectedBtn" title="Печать"><i class="bi bi-printer"></i></button>
+    </div>
+</div>
+
+<!-- Вкладки быстрой фильтрации -->
+<ul class="nav nav-tabs mb-3">
+    <li class="nav-item">
+        <a class="nav-link {% if request.GET.type == 'incoming' or not request.GET.type %}active{% endif %}" 
+           href="?type=incoming{% for key, value in request.GET.items %}{% if key != 'type' %}&{{ key }}={{ value }}{% endif %}{% endfor %}">
+            Входящие
+        </a>
+    </li>
+    <li class="nav-item">
+        <a class="nav-link {% if request.GET.type == 'outgoing' %}active{% endif %}" 
+           href="?type=outgoing{% for key, value in request.GET.items %}{% if key != 'type' %}&{{ key }}={{ value }}{% endif %}{% endfor %}">
+            Исходящие
+        </a>
+    </li>
+</ul>
+
+<!-- Форма фильтрации -->
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="get" class="row g-3 align-items-end">
+            <div class="col-md-2">
+                <label class="form-label">{{ form.start_date.label }}</label>
+                {{ form.start_date }}
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">{{ form.end_date.label }}</label>
+                {{ form.end_date }}
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">{{ form.number.label }}</label>
+                {{ form.number }}
+            </div>
+            <div class="col-md-2">
+                <label class="form-label">{{ form.department.label }}</label>
+                {{ form.department }}
+            </div>
+            <div class="col-md-2">
+                <button type="submit" class="btn btn-primary w-100">Фильтр</button>
+            </div>
+            <div class="col-md-2">
+                <a href="{% url 'telegram_journal' %}" class="btn btn-secondary w-100">Сбросить</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Таблица (без колонки действий) -->
+<form id="telegramForm" method="post">
+    {% csrf_token %}
+    <div class="table-responsive">
+        <table class="table table-hover align-middle" id="telegramTable">
+            <thead class="table-light">
+                <tr>
+                    <th>№</th>
+                    <th>Дата создания</th>
+                    <th>Отправитель</th>
+                    <th>Адресаты</th>
+                    <th>Подписание</th>
+                    <th>Категория</th>
+                    <th>Статус</th>
+                    <th>Автор</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for telegram in page_obj %}
+                <tr data-id="{{ telegram.id }}" class="telegram-row">
+                    <td><a href="{% url 'view_telegram' telegram.id %}">{{ telegram.number|default:"—" }}</a></td>
+                    <td>{{ telegram.created_at|date:"d.m.Y H:i" }}</td>
+                    <td>{{ telegram.author_department|default:"—" }}</td>
+                    <td>{% for dept in telegram.recipient_departments %}{{ dept }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}</td>
+                    <td>{% if telegram.requires_approval %}{% for dept in telegram.approver_departments %}{{ dept }}{% if not forloop.last %}, {% endif %}{% endfor %}{% endif %}</td>
+                    <td>{% if telegram.priority == 'URGENT' %}Срочная{% else %}Обычная{% endif %}</td>
+                    <td>{{ telegram.get_status_display }}</td>
+                    <td>{{ telegram.author.full_name|default:telegram.author.username }}</td>
+                </tr>
+                {% empty %}
+                <td><td colspan="8" class="text-center">Нет телеграмм</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <input type="hidden" name="selected_ids" id="selectedIds" value="">
+</form>
+
+<!-- Пагинация -->
+{% if page_obj.has_other_pages %}
+<nav><ul class="pagination justify-content-center">
+    {% if page_obj.has_previous %}
+        <li class="page-item"><a class="page-link" href="?page=1&{{ request.GET.urlencode }}">Первая</a></li>
+        <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&{{ request.GET.urlencode }}">Предыдущая</a></li>
+    {% endif %}
+    <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
+    {% if page_obj.has_next %}
+        <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&{{ request.GET.urlencode }}">Следующая</a></li>
+        <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&{{ request.GET.urlencode }}">Последняя</a></li>
+    {% endif %}
+</ul></nav>
+{% endif %}
+
+<div class="mt-3">
+    <a href="{% url 'export_excel' %}?{{ request.GET.urlencode }}" class="btn btn-sm btn-outline-success"><i class="bi bi-file-excel"></i> Экспорт в Excel</a>
+    <a href="{% url 'home' %}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-house"></i> На главную</a>
+</div>
+
+<style>
+    .telegram-row { cursor: pointer; transition: background-color 0.2s; }
+    .telegram-row.selected { background-color: #e6f0ff; outline: 2px solid #2c6e9e; outline-offset: -1px; }
+    .action-btn:active { transform: scale(0.97); box-shadow: 0 0 0 3px rgba(44,110,158,0.5); outline: none; transition: all 0.05s linear; }
+</style>
+
+<script>
+    const rows = document.querySelectorAll('.telegram-row');
+    const selectedIdsInput = document.getElementById('selectedIds');
+    let selected = new Set();
+
+    function updateSelectedIds() { selectedIdsInput.value = Array.from(selected).join(','); }
+
+    rows.forEach(row => {
+        row.addEventListener('click', function(e) {
+            if (e.target.tagName === 'A') return;
+            const id = this.getAttribute('data-id');
+            if (selected.has(id)) { selected.delete(id); this.classList.remove('selected'); }
+            else { selected.add(id); this.classList.add('selected'); }
+            updateSelectedIds();
+        });
+    });
+
+    function getSelectedIds() { return Array.from(selected); }
+
+    document.getElementById('viewSelectedBtn').addEventListener('click', () => {
+        const ids = getSelectedIds();
+        if (ids.length === 1) window.location.href = "{% url 'view_telegram' 0 %}".replace('0', ids[0]);
+        else alert(ids.length === 0 ? "Выберите телеграмму" : "Выберите только одну");
+    });
+    document.getElementById('editSelectedBtn').addEventListener('click', () => {
+        const ids = getSelectedIds();
+        if (ids.length === 1) window.location.href = "{% url 'edit_telegram' 0 %}".replace('0', ids[0]);
+        else alert(ids.length === 0 ? "Выберите телеграмму" : "Выберите только одну");
+    });
+    document.getElementById('deleteSelectedBtn').addEventListener('click', () => {
+        const ids = getSelectedIds();
+        if (ids.length === 0) { alert("Выберите хотя бы одну телеграмму"); return; }
+        if (confirm(`Удалить выбранные телеграммы (${ids.length})?`)) {
+            document.getElementById('telegramForm').action = "{% url 'mass_delete' %}";
+            document.getElementById('telegramForm').submit();
+        }
+    });
+    document.getElementById('printSelectedBtn').addEventListener('click', () => {
+        const ids = getSelectedIds();
+        if (ids.length === 1) window.open("{% url 'print_telegram' 0 %}".replace('0', ids[0]), '_blank');
+        else alert(ids.length === 0 ? "Выберите телеграмму" : "Выберите только одну");
+    });
+</script>
+{% endblock %}

@@ -1,0 +1,42 @@
+﻿{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-4">
+    <div class="card">
+        <div class="card-header bg-white">
+            <h3 class="text-center">Телеграмма №{{ telegram.number|default:"—" }}</h3>
+        </div>
+        <div class="card-body">
+            <p><strong>Дата создания:</strong> {{ telegram.created_at|date:"d.m.Y H:i" }}</p>
+            <p><strong>Автор:</strong> {{ telegram.author.full_name|default:telegram.author.username }} ({{ telegram.author.department.name|default:"—" }})</p>
+            <p><strong>Категория:</strong> {% if telegram.priority == 'URGENT' %}Срочная{% else %}Обычная{% endif %}</p>
+            <p><strong>Текст:</strong></p>
+            <div class="border p-3 bg-light" style="white-space: pre-wrap;">{{ telegram.text }}</div>
+            <hr>
+            <p><strong>Получатели:</strong></p>
+            <ul>
+                {% for recipient in telegram.recipients.all %}
+                    <li>{{ recipient.user.full_name|default:recipient.user.username }} ({{ recipient.user.department.name|default:"—" }})</li>
+                {% endfor %}
+            </ul>
+            {% if telegram.requires_approval %}
+                <p><strong>Подписанты:</strong></p>
+                <ul>
+                    {% for approver in telegram.approvers.all %}
+                        <li>{{ approver.full_name|default:approver.username }} ({{ approver.department.name|default:"—" }})</li>
+                    {% endfor %}
+                </ul>
+                <div class="mt-4 pt-3 border-top text-center">
+                    <p>Место для подписи</p>
+                    <p>______________________</p>
+                </div>
+            {% else %}
+                <p><strong>Подпись не требуется.</strong></p>
+            {% endif %}
+        </div>
+        <div class="card-footer text-end">
+            <a href="{% url 'telegram_journal' %}" class="btn btn-secondary">Назад</a>
+            <button onclick="window.print()" class="btn btn-primary">Печать</button>
+        </div>
+    </div>
+</div>
+{% endblock %}

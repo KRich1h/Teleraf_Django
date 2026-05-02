@@ -1,0 +1,62 @@
+﻿{% extends 'base.html' %}
+{% block content %}
+<h2 class="h4 mb-3"><i class="bi bi-graph-up"></i> Отчёты и аналитика</h2>
+<div class="card">
+    <div class="card-body">
+        <form method="get" class="row g-3 mb-4">
+            <div class="col-md-4">
+                <label class="form-label">Дата от</label>
+                <input type="date" name="start_date" value="{{ start_date }}" class="form-control">
+            </div>
+            <div class="col-md-4">
+                <label class="form-label">Дата до</label>
+                <input type="date" name="end_date" value="{{ end_date }}" class="form-control">
+            </div>
+            <div class="col-md-4 d-flex align-items-end">
+                <button type="submit" class="btn btn-primary">Показать</button>
+            </div>
+        </form>
+
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card mb-3">
+                    <div class="card-header">Общая статистика</div>
+                    <div class="card-body">
+                        <p><strong>Всего телеграмм:</strong> {{ total }}</p>
+                        <table class="table table-sm">
+                            <thead><tr><th>Статус</th><th>Количество</th></tr></thead>
+                            <tbody>
+                                <tr><td>Отправлено (SENT)</td><td>{{ status_counts.SENT|default:"0" }}</td></tr>
+                                <tr><td>Доставлено (DELIVERED)</td><td>{{ status_counts.DELIVERED|default:"0" }}</td></tr>
+                                <tr><td>Прочитано (READ)</td><td>{{ status_counts.READ|default:"0" }}</td></tr>
+                                <tr><td>Черновик (DRAFT)</td><td>{{ status_counts.DRAFT|default:"0" }}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% if role == 'OPERATOR' %}
+            <div class="col-md-6">
+                <div class="card mb-3">
+                    <div class="card-header">Способы доставки (оператор)</div>
+                    <div class="card-body">
+                        <table class="table table-sm">
+                            <thead><tr><th>Способ</th><th>Количество</th></tr></thead>
+                            <tbody>
+                                <tr><td>По телефону</td><td>{{ method_counts.PHONE|default:"0" }}</td></tr>
+                                <tr><td>По факсу</td><td>{{ method_counts.FAX|default:"0" }}</td></tr>
+                                <tr><td>Экспедиция</td><td>{{ method_counts.COURIER|default:"0" }}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+<div class="mt-3">
+    <a href="{% url 'export_report_excel' %}?{{ request.GET.urlencode }}" class="btn btn-sm btn-outline-success"><i class="bi bi-file-excel"></i> Экспорт отчёта в Excel</a>
+    <a href="{% url 'home' %}" class="btn btn-sm btn-outline-secondary">На главную</a>
+</div>
+{% endblock %}

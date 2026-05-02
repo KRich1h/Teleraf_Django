@@ -1,0 +1,39 @@
+﻿{% extends 'base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="h4 mb-0"><i class="bi bi-map"></i> Зоны операторов</h2>
+    {% if request.user.role == 'ADMIN' %}
+        <a href="{% url 'operatorzone_create' %}" class="btn btn-sm btn-primary"><i class="bi bi-plus"></i> Добавить</a>
+    {% endif %}
+</div>
+<div class="card">
+    <div class="card-body">
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Оператор</th>
+                        <th>Обслуживаемые подразделения</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for zone in zones %}
+                    <tr>
+                        <td>{{ zone.operator.full_name|default:zone.operator.username }}</td>
+                        <td>
+                            {% for dept in zone.departments.all %}
+                                {{ dept.code }}{% if not forloop.last %}, {% endif %}
+                            {% empty %}
+                                —
+                            {% endfor %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr><td colspan="2">Нет зон операторов. </td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

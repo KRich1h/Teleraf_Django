@@ -1,0 +1,43 @@
+﻿{% extends 'base.html' %}
+{% block content %}
+<div class="row justify-content-center mt-5">
+    <div class="col-md-5">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white text-center">
+                <h4 class="mb-0">Вход в систему</h4>
+            </div>
+            <div class="card-body">
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label class="form-label">Логин</label>
+                        <input type="text" name="username" class="form-control" required autofocus>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Пароль</label>
+                        <input type="password" name="password" class="form-control" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Войти</button>
+                    {% if form.errors %}
+                        <div class="alert alert-danger mt-3">
+                            Неверный логин или пароль. Попробуйте снова.
+                        </div>
+                    {% endif %}
+                </form>
+                <hr>
+                <!-- Контакты администраторов (если нужно) -->
+                {% if admins %}
+                <div class="mt-3">
+                    <h6>Контакты администраторов</h6>
+                    <ul class="list-unstyled small">
+                        {% for admin in admins %}
+                            <li>{{ admin.full_name|default:admin.username }}: {% if admin.email %}{{ admin.email }}{% endif %}</li>
+                        {% endfor %}
+                    </ul>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

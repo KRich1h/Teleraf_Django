@@ -1,0 +1,57 @@
+﻿{% extends 'base.html' %}
+{% block content %}
+<div class="row justify-content-center mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-white text-center">
+                <h4>Вход в АС "Телеграф"</h4>
+            </div>
+            <div class="card-body">
+                <form method="post" action="{% url 'login' %}">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label class="form-label">Логин</label>
+                        <input type="text" name="username" class="form-control" required autofocus>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Пароль</label>
+                        <input type="password" name="password" class="form-control" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">Войти</button>
+                </form>
+                <hr>
+                <div class="small text-muted text-center">
+                    Тестовые учётные записи:<br>
+                    <strong>operator</strong> / Operator — WYH-UNL-xCN-KXt<br>
+                    <strong>user</strong> / user_dept1_1 — password123
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row justify-content-center mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-white">
+                <h5>Контакты администраторов</h5>
+            </div>
+            <div class="card-body">
+                {% if admins %}
+                    <ul class="list-unstyled mb-0">
+                        {% for admin in admins %}
+                            <li class="mb-2">
+                                <strong>{{ admin.full_name|default:admin.username }}</strong><br>
+                                {% if admin.email %}Email: {{ admin.email }}<br>{% endif %}
+                                {% if admin.phone %}Телефон: {{ admin.phone }}{% endif %}
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% else %}
+                    <p class="text-muted">Контакты администраторов не указаны.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

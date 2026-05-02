@@ -1,0 +1,70 @@
+﻿{% extends 'base.html' %}
+{% block content %}
+<div class="container mt-4">
+    <div class="card">
+        <div class="card-header bg-white">
+            <h3 class="text-center">Телеграмма №{{ telegram.number|default:"—" }}</h3>
+        </div>
+        <div class="card-body">
+            <p><strong>Дата создания:</strong> {{ telegram.created_at|date:"d.m.Y H:i" }}</p>
+            <p><strong>Автор:</strong> {{ telegram.author.full_name|default:telegram.author.username }} ({{ telegram.author.department.name|default:"—" }})</p>
+            <p><strong>Категория:</strong> {% if telegram.priority == 'URGENT' %}Срочная{% else %}Обычная{% endif %}</p>
+            <p><strong>Текст:</strong></p>
+            <div class="border p-3 bg-light" style="white-space: pre-wrap;">{{ telegram.text }}</div>
+            <hr>
+            <p><strong>Получатели и статус прочтения:</strong></p>
+            <ul>
+                {% for recipient in telegram.recipients.all %}
+                    <li>
+                        {{ recipient.user.full_name|default:recipient.user.username }} ({{ recipient.user.department.name|default:"—" }})
+                        {% if recipient.status == 'READ' %}
+                            <span class="badge bg-success text-dark fw-bold">Прочитано ({{ recipient.read_at|date:"d.m.Y H:i" }})</span>
+                        {% else %}
+                            <span class="badge bg-light text-dark fw-bold border border-secondary">Не прочитано</span>
+                        {% endif %}
+                    </li>
+                {% endfor %}
+            </ul>
+            {% if telegram.requires_approval %}
+                <p><strong>Подписанты и статус подписи:</strong></p>
+                <ul>
+                    {% for approver in telegram.approvers.all %}
+                        <li>
+                            {{ approver.full_name|default:approver.username }} ({{ approver.department.name|default:"—" }})
+                            {% if approver.id in signed_approver_ids %}
+                                <span class="badge bg-success text-dark fw-bold">Подписано</span>
+                            {% else %}
+                                <span class="badge bg-light text-dark fw-bold border border-secondary">Не подписано</span>
+                            {% endif %}
+                        </li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+
+            <!-- Блок ЭЦП -->
+            {% if telegram.signature %}
+            <div class="mt-4 pt-3 border-top">
+                <strong>Электронная подпись:</strong>
+                {% if signature_valid %}
+                    <span class="badge bg-success text-dark fw-bold">✔ Подпись действительна</span>
+                    <p class="small text-muted mt-1">Хэш подписи: {{ telegram.signature|truncatechars:20 }}...</p>
+                {% else %}
+                    <span class="badge bg-danger text-white fw-bold">⚠ Подпись недействительна! Текст был изменён после подписания.</span>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+        <div class="card-footer d-flex justify-content-between">
+            <a href="{% url 'home' %}" class="btn btn-secondary">Отмена</a>
+            <div>
+                {% if user_is_recipient_pending %}
+                    <a href="{% url 'mark_as_read_and_view' user_recipient_id %}" class="btn btn-success">Прочитать</a>
+                {% endif %}
+                {% if user_is_approver_pending %}
+                    <a href="{% url 'sign_telegram' telegram.id %}" class="btn btn-warning">Подписать</a>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,96 @@
+﻿{% extends 'base.html' %}
+{% block content %}
+<div class="row">
+    <div class="col-md-4">
+        <div class="card mb-3">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-person-circle"></i> Мой профиль</h5>
+            </div>
+            <div class="card-body">
+                <p><strong>Логин:</strong> {{ request.user.username }}</p>
+                <p><strong>Роль:</strong> {{ request.user.get_role_display }}</p>
+                <p><strong>Подразделение:</strong> {{ request.user.department.name|default:"—" }}</p>
+                <p><strong>Должность:</strong> {{ request.user.position.name|default:"—" }}</p>
+            </div>
+        </div>
+        <div class="card">
+            <div class="card-header bg-white">
+                <h5 class="mb-0"><i class="bi bi-bar-chart"></i> Статистика</h5>
+            </div>
+            <div class="card-body">
+                <p><strong>Отправлено:</strong> {{ sent_count }}</p>
+                <p><strong>Получено:</strong> {{ received_count }}</p>
+                <p><strong>Непрочитано:</strong> {{ unread_count }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header bg-white">
+                <ul class="nav nav-tabs card-header-tabs">
+                    <li class="nav-item">
+                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#editProfile">Редактировать профиль</button>
+                    </li>
+                    <li class="nav-item">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#changePassword">Сменить пароль</button>
+                    </li>
+                </ul>
+            </div>
+            <div class="card-body">
+                <div class="tab-content">
+                    <!-- Вкладка редактирования профиля -->
+                    <div class="tab-pane fade show active" id="editProfile">
+                        <form method="post">
+                            {% csrf_token %}
+                            <input type="hidden" name="update_profile" value="1">
+                            <div class="mb-3">
+                                <label class="form-label">Полное имя</label>
+                                <input type="text" name="full_name" value="{{ form.full_name.value|default:'' }}" class="form-control">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Телефон</label>
+                                <input type="text" name="phone" value="{{ form.phone.value|default:'' }}" class="form-control">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Email</label>
+                                <input type="email" name="email" value="{{ form.email.value|default:'' }}" class="form-control">
+                            </div>
+                            <button type="submit" class="btn btn-primary">Сохранить изменения</button>
+                        </form>
+                    </div>
+                    <!-- Вкладка смены пароля -->
+                    <div class="tab-pane fade" id="changePassword">
+                        <form method="post">
+                            {% csrf_token %}
+                            <input type="hidden" name="change_password" value="1">
+                            <div class="mb-3">
+                                <label class="form-label">Старый пароль</label>
+                                <input type="password" name="old_password" class="form-control" required>
+                                {% if password_form.old_password.errors %}
+                                    <div class="text-danger">{{ password_form.old_password.errors }}</div>
+                                {% endif %}
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Новый пароль</label>
+                                <input type="password" name="new_password1" class="form-control" required>
+                                {% if password_form.new_password1.errors %}
+                                    <div class="text-danger">{{ password_form.new_password1.errors }}</div>
+                                {% endif %}
+                                <div class="form-text">Пароль должен содержать не менее 8 символов, не должен быть слишком похож на личную информацию и не может состоять только из цифр.</div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Подтверждение нового пароля</label>
+                                <input type="password" name="new_password2" class="form-control" required>
+                                {% if password_form.new_password2.errors %}
+                                    <div class="text-danger">{{ password_form.new_password2.errors }}</div>
+                                {% endif %}
+                            </div>
+                            <button type="submit" class="btn btn-warning">Сменить пароль</button>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
