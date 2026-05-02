@@ -1,208 +1,545 @@
 ﻿{% extends 'base.html' %}
 {% block content %}
 <div class="row justify-content-center">
-    <div class="col-md-8">
-        <div class="card">
-            <div class="card-header bg-white">
-                <ul class="nav nav-tabs card-header-tabs" id="createTabs" role="tablist">
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link active" id="create-tab" data-bs-toggle="tab" data-bs-target="#create" type="button" role="tab">Создание</button>
-                    </li>
-                    <li class="nav-item" role="presentation">
-                        <button class="nav-link" id="templates-tab" data-bs-toggle="tab" data-bs-target="#templates" type="button" role="tab">Шаблоны</button>
-                    </li>
-                </ul>
+    <div class="col-lg-11">
+        <div class="card shadow-sm">
+            <div class="card-header bg-white py-2">
+                <h5 class="mb-0"><i class="bi bi-pencil-square me-2"></i>Создание телеграммы</h5>
             </div>
             <div class="card-body">
-                <div class="tab-content">
-                    <!-- Вкладка "Создание" -->
-                    <div class="tab-pane fade show active" id="create" role="tabpanel">
-                        <form method="post" id="telegramForm">
-                            {% csrf_token %}
-                            <div class="mb-3">
-                                <label class="form-label">Приоритет</label>
-                                <div>
-                                    <div class="form-check form-check-inline">
-                                        <input class="form-check-input" type="radio" name="priority" id="normal" value="NORMAL" checked>
-                                        <label class="form-check-label" for="normal">Обычная</label>
-                                    </div>
-                                    <div class="form-check form-check-inline">
-                                        <input class="form-check-input" type="radio" name="priority" id="urgent" value="URGENT">
-                                        <label class="form-check-label" for="urgent">Срочная</label>
-                                    </div>
+                <form method="post" id="telegramForm">
+                    {% csrf_token %}
+
+                    <!-- Получатели -->
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Получатели</label>
+                        <div class="row g-2">
+                            <!-- Левая колонка -->
+                            <div class="col-md-6">
+                                <div class="border rounded p-2 bg-light" style="height: 340px; display: flex; flex-direction: column;">
+                                    <input type="text" id="searchDept" class="form-control form-control-sm mb-2" placeholder="Поиск подразделения...">
+                                    <div id="availableTree" style="overflow-y: auto; flex-grow: 1;" class="small"></div>
                                 </div>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label">Подразделения</label>
-                                <div id="departments">
-                                    {% for dept in departments %}
-                                    <div class="form-check">
-                                        <input class="form-check-input dept-checkbox" type="checkbox" value="{{ dept.id }}" id="dept_{{ dept.id }}">
-                                        <label class="form-check-label" for="dept_{{ dept.id }}">
-                                            {{ dept.code }} - {{ dept.name }}
-                                        </label>
-                                    </div>
-                                    {% endfor %}
+                            <!-- Правая колонка -->
+                            <div class="col-md-6">
+                                <div class="border rounded p-2 bg-light" style="height: 340px; display: flex; flex-direction: column;">
+                                    <div id="selectedTree" style="overflow-y: auto; flex-grow: 1;"></div>
+                                    <button type="button" class="btn btn-sm btn-outline-danger mt-2" id="clearAllRecipients">Очистить всех</button>
                                 </div>
                             </div>
-                            <div class="mb-3" id="recipients_block" style="display: none;">
-                                <label class="form-label">Получатели</label>
-                                <div id="recipients_checkboxes"></div>
-                            </div>
-                            <div class="mb-3">
-                                <label class="form-label">Текст телеграммы</label>
-                                <textarea name="text" id="telegramText" class="form-control" rows="5" required></textarea>
-                                <div class="mt-2">
-                                    <input type="file" id="wordFile" accept=".docx" style="display: none;">
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" id="uploadWordBtn">Загрузить из Word</button>
-                                </div>
-                            </div>
-                            <div class="mb-3 form-check">
-                                <input type="checkbox" class="form-check-input" id="requires_approval" name="requires_approval">
-                                <label class="form-check-label" for="requires_approval">Требуется подпись</label>
-                            </div>
-                            <div class="mb-3" id="approvers_block" style="display: none;">
-                                <label class="form-label">Подписанты</label>
-                                <div id="approvers_checkboxes"></div>
-                            </div>
-                            <button type="submit" class="btn btn-primary">Отправить</button>
-                            <a href="{% url 'telegram_journal' %}" class="btn btn-secondary">Отмена</a>
-                        </form>
+                        </div>
+                        <input type="hidden" name="recipients" id="recipientsHidden">
                     </div>
 
-                    <!-- Вкладка "Шаблоны" -->
-                    <div class="tab-pane fade" id="templates" role="tabpanel">
-                        <div class="mb-3">
-                            <label class="form-label">Выберите шаблон</label>
-                            <select class="form-select" id="templateSelect">
-                                <option value="">-- Выберите шаблон --</option>
-                                {% for template in templates %}
-                                    <option value="{{ template.id }}" data-text="{{ template.text|escapejs }}">{{ template.name }}</option>
-                                {% endfor %}
-                            </select>
-                        </div>
-                        <button type="button" class="btn btn-primary" id="applyTemplateBtn">Применить шаблон</button>
+                    <!-- Текст телеграммы -->
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Текст телеграммы</label>
+                        <textarea name="text" id="telegramText" class="form-control" rows="5" required placeholder="Введите текст..."></textarea>
                     </div>
-                </div>
+
+                    <!-- Чекбокс подписи и загрузка Word -->
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <div class="form-check">
+                            <input type="checkbox" class="form-check-input" id="requires_approval" name="requires_approval">
+                            <label class="form-check-label" for="requires_approval">Требуется подпись</label>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="uploadWordBtn">
+                            <i class="bi bi-file-word"></i> Загрузить из Word
+                        </button>
+                        <input type="file" id="wordFile" accept=".docx" style="display: none;">
+                    </div>
+
+                    <!-- Блок подписантов (скрыт) -->
+                    <div id="approversGroup" style="display: none;">
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Подписанты</label>
+                            <div class="row g-2">
+                                <div class="col-md-6">
+                                    <div class="border rounded p-2 bg-light" style="height: 300px; display: flex; flex-direction: column;">
+                                        <input type="text" id="searchApproverDept" class="form-control form-control-sm mb-2" placeholder="Поиск подразделения...">
+                                        <div id="availableApproverTree" style="overflow-y: auto; flex-grow: 1;"></div>
+                                    </div>
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="border rounded p-2 bg-light" style="height: 300px; display: flex; flex-direction: column;">
+                                        <div id="selectedApproverTree" style="overflow-y: auto; flex-grow: 1;"></div>
+                                        <button type="button" class="btn btn-sm btn-outline-danger mt-2" id="clearAllApprovers">Очистить всех</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <input type="hidden" name="approvers" id="approversHidden">
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button type="submit" class="btn btn-primary">Отправить</button>
+                        <a href="{% url 'telegram_journal' %}" class="btn btn-secondary">Отмена</a>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
 </div>
 
 <script>
-    const deptCheckboxes = document.querySelectorAll('.dept-checkbox');
-    const recipientsBlock = document.getElementById('recipients_block');
-    const recipientsDiv = document.getElementById('recipients_checkboxes');
-    const approvalCheckbox = document.getElementById('requires_approval');
-    const approversBlock = document.getElementById('approvers_block');
-    const approversDiv = document.getElementById('approvers_checkboxes');
+    // --- Данные ---
+    let allDepartments = [];      // [{id, name, users: [{id, position_name, full_name, username}]}]
+    let selectedRecipients = {};  // { deptId: { deptName, users: { userId: displayString } } }
 
-    function updateRecipients() {
-        const selectedDepts = Array.from(deptCheckboxes)
-            .filter(cb => cb.checked)
-            .map(cb => cb.value);
-        if (selectedDepts.length === 0) {
-            recipientsBlock.style.display = 'none';
+    async function loadDepartments() {
+        try {
+            const res = await fetch('/api/departments-with-users/');
+            const data = await res.json();
+            allDepartments = data;
+            renderAvailableTree();
+        } catch(e) {
+            document.getElementById('availableTree').innerHTML = '<div class="text-danger">Ошибка загрузки</div>';
+        }
+    }
+
+    function renderAvailableTree(filterText = '') {
+        const container = document.getElementById('availableTree');
+        const lowerFilter = filterText.toLowerCase();
+        let filtered = allDepartments;
+        if (lowerFilter) filtered = allDepartments.filter(d => d.name.toLowerCase().includes(lowerFilter));
+        if (!filtered.length) {
+            container.innerHTML = '<div class="text-muted small">Подразделения не найдены</div>';
             return;
         }
-        fetch(`/get-recipients/?departments=${selectedDepts.join(',')}`)
-            .then(response => response.json())
-            .then(data => {
-                recipientsDiv.innerHTML = '';
-                data.forEach(user => {
-                    recipientsDiv.innerHTML += `
+        let html = '';
+        filtered.forEach((dept, idx) => {
+            const collapseId = `availCollapse${idx}_${dept.id}`;
+            html += `
+                <div class="mb-2 border-bottom pb-1">
+                    <div class="d-flex justify-content-between align-items-center" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#${collapseId}" aria-expanded="false">
+                        <strong class="small">${escapeHtml(dept.name)}</strong>
+                        <i class="bi bi-chevron-down toggle-icon"></i>
+                    </div>
+                    <div class="collapse mt-1" id="${collapseId}">
+                        <div class="ms-2">
+                            <button type="button" class="btn btn-sm btn-link p-0 mb-1 add-all-dept" data-dept-id="${dept.id}" data-dept-name="${escapeHtml(dept.name)}">+ Добавить всех</button>
+                            <div class="small">
+            `;
+            if (dept.users && dept.users.length) {
+                dept.users.forEach(user => {
+                    const displayName = user.position_name ? user.position_name : (user.full_name || user.username);
+                    html += `
                         <div class="form-check">
-                            <input class="form-check-input" type="checkbox" name="recipients" value="${user.id}" id="recipient_${user.id}">
-                            <label class="form-check-label" for="recipient_${user.id}">
-                                ${user.full_name || user.username}
-                            </label>
+                            <input class="form-check-input user-cb" type="checkbox" value="${user.id}" data-display-name="${escapeHtml(displayName)}" data-dept-id="${dept.id}" data-dept-name="${escapeHtml(dept.name)}" id="user_${user.id}">
+                            <label class="form-check-label" for="user_${user.id}">${escapeHtml(displayName)}</label>
                         </div>
                     `;
                 });
-                recipientsBlock.style.display = 'block';
-            })
-            .catch(err => console.error('Ошибка загрузки получателей:', err));
+            } else {
+                html += '<div class="text-muted">Нет сотрудников</div>';
+            }
+            html += `</div></div></div></div>`;
+        });
+        container.innerHTML = html;
+        // аккордеоны
+        document.querySelectorAll('#availableTree [data-bs-toggle="collapse"]').forEach(header => {
+            header.addEventListener('click', function(e) {
+                const icon = this.querySelector('.toggle-icon');
+                if (icon) icon.classList.toggle('bi-chevron-down');
+                if (icon) icon.classList.toggle('bi-chevron-up');
+            });
+        });
+        // кнопки добавить всех
+        document.querySelectorAll('.add-all-dept').forEach(btn => {
+            btn.removeEventListener('click', addAllFromDept);
+            btn.addEventListener('click', addAllFromDept);
+        });
+        // чекбоксы
+        document.querySelectorAll('.user-cb').forEach(cb => {
+            cb.removeEventListener('change', onUserCheck);
+            cb.addEventListener('change', onUserCheck);
+        });
     }
 
-    function updateApprovers() {
-        if (!approvalCheckbox.checked) {
-            approversBlock.style.display = 'none';
-            return;
+    function addAllFromDept(e) {
+        const btn = e.currentTarget;
+        const deptId = parseInt(btn.dataset.deptId);
+        const deptName = btn.dataset.deptName;
+        const dept = allDepartments.find(d => d.id === deptId);
+        if (dept && dept.users) {
+            dept.users.forEach(user => {
+                const displayName = user.position_name ? user.position_name : (user.full_name || user.username);
+                addRecipient(user.id, displayName, deptId, deptName);
+            });
         }
-        const selectedDepts = Array.from(deptCheckboxes)
-            .filter(cb => cb.checked)
-            .map(cb => cb.value);
-        if (selectedDepts.length === 0) {
-            approversBlock.style.display = 'none';
-            return;
-        }
-        fetch(`/get-approvers/?departments=${selectedDepts.join(',')}`)
-            .then(response => response.json())
-            .then(data => {
-                approversDiv.innerHTML = '';
-                data.forEach(user => {
-                    approversDiv.innerHTML += `
-                        <div class="form-check">
-                            <input class="form-check-input" type="checkbox" name="approvers" value="${user.id}" id="approver_${user.id}">
-                            <label class="form-check-label" for="approver_${user.id}">
-                                ${user.full_name || user.username} (${user.department_name || '—'})
-                            </label>
-                        </div>
-                    `;
-                });
-                approversBlock.style.display = 'block';
-            })
-            .catch(err => console.error('Ошибка загрузки подписантов:', err));
+        renderSelectedTree();
     }
 
-    deptCheckboxes.forEach(cb => cb.addEventListener('change', () => {
-        updateRecipients();
-        if (approvalCheckbox.checked) updateApprovers();
-    }));
-    approvalCheckbox.addEventListener('change', () => {
-        if (approvalCheckbox.checked) updateApprovers();
-        else approversBlock.style.display = 'none';
+    function onUserCheck(e) {
+        const cb = e.currentTarget;
+        const userId = parseInt(cb.value);
+        const displayName = cb.dataset.displayName;
+        const deptId = parseInt(cb.dataset.deptId);
+        const deptName = cb.dataset.deptName;
+        if (cb.checked) addRecipient(userId, displayName, deptId, deptName);
+        else removeRecipient(userId, deptId);
+        renderSelectedTree();
+    }
+
+    function addRecipient(userId, displayName, deptId, deptName) {
+        if (!selectedRecipients[deptId]) selectedRecipients[deptId] = { deptName, users: {} };
+        selectedRecipients[deptId].users[userId] = displayName;
+    }
+
+    function removeRecipient(userId, deptId) {
+        if (selectedRecipients[deptId] && selectedRecipients[deptId].users[userId]) {
+            delete selectedRecipients[deptId].users[userId];
+            if (Object.keys(selectedRecipients[deptId].users).length === 0) delete selectedRecipients[deptId];
+        }
+    }
+
+    function renderSelectedTree() {
+        const container = document.getElementById('selectedTree');
+        if (Object.keys(selectedRecipients).length === 0) {
+            container.innerHTML = '<div class="text-muted small">Нет выбранных получателей</div>';
+            updateHiddenRecipients();
+            return;
+        }
+        // сохраняем открытые панели
+        const openIds = new Set();
+        document.querySelectorAll('#selectedTree .collapse.show').forEach(el => openIds.add(el.id));
+        let html = '';
+        for (let deptId in selectedRecipients) {
+            const dept = selectedRecipients[deptId];
+            const collapseId = `selectedCollapse${deptId}`;
+            const isOpen = openIds.has(collapseId) ? 'show' : '';
+            html += `
+                <div class="mb-2 border-bottom pb-1">
+                    <div class="d-flex justify-content-between align-items-center" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#${collapseId}" aria-expanded="${isOpen ? 'true' : 'false'}">
+                        <strong class="small">${escapeHtml(dept.deptName)}</strong>
+                        <i class="bi bi-chevron-${isOpen ? 'up' : 'down'} toggle-icon"></i>
+                    </div>
+                    <div class="collapse ${isOpen}" id="${collapseId}">
+                        <div class="ms-2 small">
+                            <button type="button" class="btn btn-sm btn-link p-0 mb-1 remove-dept" data-dept-id="${deptId}">Удалить всех из отдела</button>
+                            <div>
+            `;
+            for (let uid in dept.users) {
+                html += `
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span>${escapeHtml(dept.users[uid])}</span>
+                        <button type="button" class="btn btn-sm btn-outline-danger py-0 px-1 remove-user" data-user-id="${uid}" data-dept-id="${deptId}">&times;</button>
+                    </div>
+                `;
+            }
+            html += `</div></div></div></div>`;
+        }
+        container.innerHTML = html;
+        // аккордеон
+        document.querySelectorAll('#selectedTree [data-bs-toggle="collapse"]').forEach(header => {
+            header.addEventListener('click', function() {
+                const icon = this.querySelector('.toggle-icon');
+                if (icon) {
+                    setTimeout(() => {
+                        const targetId = this.getAttribute('data-bs-target').substring(1);
+                        const collapseEl = document.getElementById(targetId);
+                        if (collapseEl.classList.contains('show')) {
+                            icon.classList.remove('bi-chevron-down');
+                            icon.classList.add('bi-chevron-up');
+                        } else {
+                            icon.classList.remove('bi-chevron-up');
+                            icon.classList.add('bi-chevron-down');
+                        }
+                    }, 50);
+                }
+            });
+        });
+        // кнопки удаления
+        document.querySelectorAll('.remove-dept').forEach(btn => {
+            btn.removeEventListener('click', () => {});
+            btn.addEventListener('click', (e) => {
+                const deptId = parseInt(btn.dataset.deptId);
+                delete selectedRecipients[deptId];
+                renderSelectedTree();
+                document.querySelectorAll(`.user-cb[data-dept-id="${deptId}"]`).forEach(cb => cb.checked = false);
+            });
+        });
+        document.querySelectorAll('.remove-user').forEach(btn => {
+            btn.removeEventListener('click', () => {});
+            btn.addEventListener('click', (e) => {
+                const userId = parseInt(btn.dataset.userId);
+                const deptId = parseInt(btn.dataset.deptId);
+                removeRecipient(userId, deptId);
+                renderSelectedTree();
+                const cb = document.querySelector(`.user-cb[value="${userId}"]`);
+                if (cb) cb.checked = false;
+                e.stopPropagation();
+            });
+        });
+        updateHiddenRecipients();
+    }
+
+    function updateHiddenRecipients() {
+        const ids = [];
+        for (let deptId in selectedRecipients) {
+            ids.push(...Object.keys(selectedRecipients[deptId].users).map(Number));
+        }
+        document.getElementById('recipientsHidden').value = ids.join(',');
+    }
+
+    let searchTimeout;
+    document.getElementById('searchDept').addEventListener('input', (e) => {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(() => renderAvailableTree(e.target.value), 300);
+    });
+    document.getElementById('clearAllRecipients').addEventListener('click', () => {
+        selectedRecipients = {};
+        renderSelectedTree();
+        document.querySelectorAll('.user-cb').forEach(cb => cb.checked = false);
     });
 
-    // Шаблоны
-    document.getElementById('applyTemplateBtn').addEventListener('click', () => {
-        const select = document.getElementById('templateSelect');
-        const option = select.options[select.selectedIndex];
-        const text = option.getAttribute('data-text');
-        if (text) {
-            document.getElementById('telegramText').value = text;
-            const createTab = new bootstrap.Tab(document.getElementById('create-tab'));
-            createTab.show();
+    // --- Подписанты (только начальники, группировка по подразделениям) ---
+    let allApproversDepartments = [];
+    let selectedApprovers = {};
+
+    async function loadApprovers() {
+        try {
+            const res = await fetch('/api/approvers-tree/');
+            const data = await res.json();
+            allApproversDepartments = data;
+            renderAvailableApproverTree();
+        } catch(e) {}
+    }
+
+    function renderAvailableApproverTree(filter='') {
+        const container = document.getElementById('availableApproverTree');
+        const lower = filter.toLowerCase();
+        let filtered = allApproversDepartments;
+        if (lower) filtered = filtered.filter(d => d.name.toLowerCase().includes(lower));
+        if (!filtered.length) {
+            container.innerHTML = '<div class="text-muted small">Подразделения не найдены</div>';
+            return;
+        }
+        let html = '';
+        filtered.forEach((dept, idx) => {
+            const collapseId = `availApproverCollapse${idx}_${dept.id}`;
+            html += `
+                <div class="mb-2 border-bottom pb-1">
+                    <div class="d-flex justify-content-between align-items-center" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#${collapseId}">
+                        <strong class="small">${escapeHtml(dept.name)}</strong>
+                        <i class="bi bi-chevron-down toggle-icon"></i>
+                    </div>
+                    <div class="collapse mt-1" id="${collapseId}">
+                        <div class="ms-2">
+                            <button type="button" class="btn btn-sm btn-link p-0 mb-1 add-all-approver" data-dept-id="${dept.id}" data-dept-name="${escapeHtml(dept.name)}">+ Добавить всех</button>
+                            <div>
+            `;
+            if (dept.users && dept.users.length) {
+                dept.users.forEach(user => {
+                    const displayName = user.position_name ? user.position_name : (user.full_name || user.username);
+                    html += `
+                        <div class="form-check">
+                            <input class="form-check-input approver-cb" type="checkbox" value="${user.id}" data-display-name="${escapeHtml(displayName)}" data-dept-id="${dept.id}" data-dept-name="${escapeHtml(dept.name)}" id="approver_${user.id}">
+                            <label for="approver_${user.id}">${escapeHtml(displayName)}</label>
+                        </div>
+                    `;
+                });
+            } else {
+                html += '<div class="text-muted">Нет подписантов</div>';
+            }
+            html += `</div></div></div></div>`;
+        });
+        container.innerHTML = html;
+        // аккордеон
+        document.querySelectorAll('#availableApproverTree [data-bs-toggle="collapse"]').forEach(header => {
+            header.addEventListener('click', function() {
+                const icon = this.querySelector('.toggle-icon');
+                if (icon) icon.classList.toggle('bi-chevron-down');
+                if (icon) icon.classList.toggle('bi-chevron-up');
+            });
+        });
+        // кнопки добавить всех
+        document.querySelectorAll('.add-all-approver').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const deptId = parseInt(btn.dataset.deptId);
+                const deptName = btn.dataset.deptName;
+                const dept = allApproversDepartments.find(d => d.id === deptId);
+                if (dept && dept.users) {
+                    dept.users.forEach(user => {
+                        const displayName = user.position_name ? user.position_name : (user.full_name || user.username);
+                        addApprover(user.id, displayName, deptId, deptName);
+                    });
+                    renderSelectedApproverTree();
+                }
+            });
+        });
+        // чекбоксы
+        document.querySelectorAll('.approver-cb').forEach(cb => {
+            cb.addEventListener('change', (e) => {
+                const userId = parseInt(cb.value);
+                const displayName = cb.dataset.displayName;
+                const deptId = parseInt(cb.dataset.deptId);
+                const deptName = cb.dataset.deptName;
+                if (cb.checked) addApprover(userId, displayName, deptId, deptName);
+                else removeApprover(userId, deptId);
+                renderSelectedApproverTree();
+            });
+        });
+    }
+
+    function addApprover(userId, displayName, deptId, deptName) {
+        if (!selectedApprovers[deptId]) selectedApprovers[deptId] = { deptName, users: {} };
+        selectedApprovers[deptId].users[userId] = displayName;
+    }
+
+    function removeApprover(userId, deptId) {
+        if (selectedApprovers[deptId] && selectedApprovers[deptId].users[userId]) {
+            delete selectedApprovers[deptId].users[userId];
+            if (Object.keys(selectedApprovers[deptId].users).length === 0) delete selectedApprovers[deptId];
+        }
+    }
+
+    function renderSelectedApproverTree() {
+        const container = document.getElementById('selectedApproverTree');
+        if (Object.keys(selectedApprovers).length === 0) {
+            container.innerHTML = '<div class="text-muted small">Нет выбранных подписантов</div>';
+            updateHiddenApprovers();
+            return;
+        }
+        const openIds = new Set();
+        document.querySelectorAll('#selectedApproverTree .collapse.show').forEach(el => openIds.add(el.id));
+        let html = '';
+        for (let deptId in selectedApprovers) {
+            const dept = selectedApprovers[deptId];
+            const collapseId = `selectedApproverCollapse${deptId}`;
+            const isOpen = openIds.has(collapseId) ? 'show' : '';
+            html += `
+                <div class="mb-2 border-bottom pb-1">
+                    <div class="d-flex justify-content-between align-items-center" style="cursor: pointer;" data-bs-toggle="collapse" data-bs-target="#${collapseId}">
+                        <strong class="small">${escapeHtml(dept.deptName)}</strong>
+                        <i class="bi bi-chevron-${isOpen ? 'up' : 'down'} toggle-icon"></i>
+                    </div>
+                    <div class="collapse ${isOpen}" id="${collapseId}">
+                        <div class="ms-2 small">
+                            <button type="button" class="btn btn-sm btn-link p-0 mb-1 remove-approver-dept" data-dept-id="${deptId}">Удалить всех из отдела</button>
+                            <div>
+            `;
+            for (let uid in dept.users) {
+                html += `
+                    <div class="d-flex justify-content-between align-items-center mb-1">
+                        <span>${escapeHtml(dept.users[uid])}</span>
+                        <button type="button" class="btn btn-sm btn-outline-danger py-0 px-1 remove-approver-user" data-user-id="${uid}" data-dept-id="${deptId}">&times;</button>
+                    </div>
+                `;
+            }
+            html += `</div></div></div></div>`;
+        }
+        container.innerHTML = html;
+        // аккордеон
+        document.querySelectorAll('#selectedApproverTree [data-bs-toggle="collapse"]').forEach(header => {
+            header.addEventListener('click', function() {
+                const icon = this.querySelector('.toggle-icon');
+                if (icon) {
+                    setTimeout(() => {
+                        const targetId = this.getAttribute('data-bs-target').substring(1);
+                        const collapseEl = document.getElementById(targetId);
+                        if (collapseEl.classList.contains('show')) {
+                            icon.classList.remove('bi-chevron-down');
+                            icon.classList.add('bi-chevron-up');
+                        } else {
+                            icon.classList.remove('bi-chevron-up');
+                            icon.classList.add('bi-chevron-down');
+                        }
+                    }, 50);
+                }
+            });
+        });
+        // кнопки удаления
+        document.querySelectorAll('.remove-approver-dept').forEach(btn => {
+            btn.addEventListener('click', () => {
+                delete selectedApprovers[parseInt(btn.dataset.deptId)];
+                renderSelectedApproverTree();
+                document.querySelectorAll(`.approver-cb[data-dept-id="${parseInt(btn.dataset.deptId)}"]`).forEach(cb => cb.checked = false);
+            });
+        });
+        document.querySelectorAll('.remove-approver-user').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const userId = parseInt(btn.dataset.userId);
+                const deptId = parseInt(btn.dataset.deptId);
+                removeApprover(userId, deptId);
+                renderSelectedApproverTree();
+                const cb = document.querySelector(`.approver-cb[value="${userId}"]`);
+                if (cb) cb.checked = false;
+                e.stopPropagation();
+            });
+        });
+        updateHiddenApprovers();
+    }
+
+    function updateHiddenApprovers() {
+        const ids = [];
+        for (let deptId in selectedApprovers) {
+            ids.push(...Object.keys(selectedApprovers[deptId].users).map(Number));
+        }
+        document.getElementById('approversHidden').value = ids.join(',');
+    }
+
+    document.getElementById('clearAllApprovers').addEventListener('click', () => {
+        selectedApprovers = {};
+        renderSelectedApproverTree();
+        document.querySelectorAll('.approver-cb').forEach(cb => cb.checked = false);
+    });
+
+    let searchApproverTimeout;
+    document.getElementById('searchApproverDept').addEventListener('input', (e) => {
+        clearTimeout(searchApproverTimeout);
+        searchApproverTimeout = setTimeout(() => renderAvailableApproverTree(e.target.value), 300);
+    });
+
+    const approvalCheckbox = document.getElementById('requires_approval');
+    const approversGroup = document.getElementById('approversGroup');
+    approvalCheckbox.addEventListener('change', function() {
+        if (this.checked) {
+            approversGroup.style.display = 'block';
+            if (allApproversDepartments.length === 0) loadApprovers();
         } else {
-            alert('Выберите шаблон');
+            approversGroup.style.display = 'none';
+            selectedApprovers = {};
+            renderSelectedApproverTree();
         }
     });
 
     // Загрузка из Word
-    document.getElementById('uploadWordBtn').addEventListener('click', () => {
-        document.getElementById('wordFile').click();
-    });
+    document.getElementById('uploadWordBtn').addEventListener('click', () => document.getElementById('wordFile').click());
     document.getElementById('wordFile').addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
-        const formData = new FormData();
-        formData.append('file', file);
+        const fd = new FormData();
+        fd.append('file', file);
         try {
-            const response = await fetch("{% url 'upload_word' %}", {
-                method: 'POST',
-                body: formData,
-                headers: { 'X-CSRFToken': '{{ csrf_token }}' }
-            });
-            const data = await response.json();
-            if (data.error) {
-                alert(data.error);
-            } else {
-                document.getElementById('telegramText').value = data.text;
-            }
-        } catch (err) {
-            alert('Ошибка загрузки файла');
-        }
+            const resp = await fetch("{% url 'upload_word' %}", { method: 'POST', body: fd, headers: { 'X-CSRFToken': '{{ csrf_token }}' } });
+            const data = await resp.json();
+            if (data.error) alert(data.error);
+            else document.getElementById('telegramText').value = data.text;
+        } catch(err) { alert('Ошибка загрузки'); }
         e.target.value = '';
     });
+
+    document.getElementById('telegramForm').addEventListener('submit', (e) => {
+        updateHiddenRecipients();
+        if (!document.getElementById('recipientsHidden').value) {
+            e.preventDefault();
+            alert('Выберите хотя бы одного получателя');
+        }
+        if (approvalCheckbox.checked) updateHiddenApprovers();
+    });
+
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
+    }
+
+    loadDepartments();
 </script>
 {% endblock %}

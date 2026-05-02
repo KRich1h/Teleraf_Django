@@ -46,4 +46,6 @@ urlpatterns = [
     path('upload-word/', views.upload_word, name='upload_word'),
     path('telegram-detail/<int:telegram_id>/', views.telegram_detail_json, name='telegram_detail_json'),
     path('profile/', views.profile, name='profile'),
+    path('api/departments-with-users/', views.departments_with_users, name='departments_with_users'),
+    path('api/approvers-tree/', views.approvers_tree, name='approvers_tree'),
 ]

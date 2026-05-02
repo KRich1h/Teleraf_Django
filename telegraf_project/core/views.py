@@ -507,49 +507,72 @@ def generate_telegram_number():
 @login_required
 def create_telegram_page(request):
     if request.method == 'POST':
-        recipients_ids = request.POST.getlist('recipients')
-        approvers_ids = request.POST.getlist('approvers')
+        # Получаем данные из POST
         text = request.POST.get('text')
-        requires_approval = request.POST.get('requires_approval') == 'on'
         priority = request.POST.get('priority', 'NORMAL')
-        
-        # Запрещаем отправлять телеграмму самому себе
-        recipients_ids = [uid for uid in recipients_ids if int(uid) != request.user.id]
-        # Запрещаем назначать себя подписантом
-        approvers_ids = [aid for aid in approvers_ids if int(aid) != request.user.id]
-        
+        requires_approval = request.POST.get('requires_approval') == 'on'
+
+        # Обработка получателей: может быть строка с запятыми или список
+        recipients_raw = request.POST.get('recipients', '')
+        if recipients_raw:
+            recipients_ids = [int(x) for x in recipients_raw.split(',') if x.strip()]
+        else:
+            recipients_ids = []
+
+        # Обработка подписантов: аналогично
+        approvers_raw = request.POST.get('approvers', '')
+        if approvers_raw:
+            approvers_ids = [int(x) for x in approvers_raw.split(',') if x.strip()]
+        else:
+            approvers_ids = []
+
+        # Исключаем текущего пользователя из получателей и подписантов
+        recipients_ids = [uid for uid in recipients_ids if uid != request.user.id]
+        approvers_ids = [aid for aid in approvers_ids if aid != request.user.id]
+
+        # Валидация
         if not recipients_ids:
             messages.error(request, 'Выберите хотя бы одного получателя (не считая себя).')
             return redirect('create_telegram_page')
-        
+
+        if requires_approval and not approvers_ids:
+            messages.error(request, 'При включённой подписи выберите хотя бы одного подписанта.')
+            return redirect('create_telegram_page')
+
         with transaction.atomic():
+            # Генерация номера телеграммы
             number = generate_telegram_number()
+
+            # Создаём телеграмму
             telegram = Telegram.objects.create(
                 author=request.user,
                 text=text,
                 number=number,
                 priority=priority,
                 requires_approval=requires_approval,
-                status=Telegram.Status.SENT
+                status=Telegram.Status.SENT  # или DRAFT, по вашему усмотрению
             )
-            # Получатели
+
+            # Добавляем получателей
             for uid in recipients_ids:
                 TelegramRecipient.objects.create(telegram=telegram, user_id=uid, status='PENDING')
-            # Подписанты
+
+            # Добавляем подписантов (если требуется)
             if requires_approval:
-                if not approvers_ids:
-                    messages.error(request, 'При включённой подписи выберите хотя бы одного подписанта.')
-                    telegram.delete()
-                    return redirect('create_telegram_page')
                 telegram.approvers.set(approvers_ids)
-                # Подписанты также получают телеграмму как получатели
-                for approver_id in approvers_ids:
-                    TelegramRecipient.objects.get_or_create(telegram=telegram, user_id=approver_id, defaults={'status': 'PENDING'})
-        
-        messages.success(request, f'Телеграмма №{number} отправлена {len(recipients_ids)} получателям.')
+                # Подписанты также автоматически становятся получателями (по желанию)
+                for aid in approvers_ids:
+                    TelegramRecipient.objects.get_or_create(
+                        telegram=telegram,
+                        user_id=aid,
+                        defaults={'status': 'PENDING'}
+                    )
+
+        messages.success(request, f'Телеграмма №{number} успешно отправлена {len(recipients_ids)} получателям.')
         return redirect('telegram_journal')
-    
+
     else:
+        # GET-запрос — показываем форму
         departments = Department.objects.all()
         templates = TelegramTemplate.objects.all()
         return render(request, 'core/create_telegram.html', {
@@ -869,3 +892,69 @@ def profile(request):
         'unread_count': unread_count,
     }
     return render(request, 'core/profile.html', context)
+
+def departments_with_users(request):
+    data = []
+    departments = Department.objects.prefetch_related('user_set__position').all()
+    for dept in departments:
+        users = dept.user_set.filter(is_active=True).exclude(id=request.user.id)
+        user_list = []
+        for user in users:
+            user_list.append({
+                'id': user.id,
+                'position_name': user.position.name if user.position else 'Без должности',
+                'full_name': user.full_name or user.username,
+                'username': user.username
+            })
+        data.append({
+            'id': dept.id,
+            'name': f"{dept.code} - {dept.name}",
+            'users': user_list
+        })
+    return JsonResponse(data, safe=False)
+
+def approvers_tree(request):
+    # Отбираем активных пользователей с нужными должностями
+    users = User.objects.filter(
+        is_active=True,
+        position__name__in=['Начальник депо', 'Начальник дистанции', 'Главный инженер']
+    ).select_related('department').values(
+        'id',
+        'full_name',
+        'username',
+        'position__name',
+        'department__id',
+        'department__code',
+        'department__name'
+    )
+    
+    # Группировка по подразделениям
+    dept_dict = {}
+    for u in users:
+        dept_id = u['department__id']
+        if dept_id is None:
+            continue
+        dept_key = dept_id
+        if dept_key not in dept_dict:
+            dept_dict[dept_key] = {
+                'name': f"{u['department__code']} - {u['department__name']}",
+                'users': []
+            }
+        dept_dict[dept_key]['users'].append({
+            'id': u['id'],
+            'position_name': u['position__name'],
+            'full_name': u['full_name'] or u['username'],
+            'username': u['username']
+        })
+    
+    # Преобразуем в список
+    data = [
+        {
+            'id': dept_id,
+            'name': info['name'],
+            'users': info['users']
+        }
+        for dept_id, info in dept_dict.items()
+    ]
+    
+    return JsonResponse(data, safe=False)
