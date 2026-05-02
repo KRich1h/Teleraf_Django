@@ -19,9 +19,21 @@
         }
         body {
             background-color: var(--bg-light);
-            font-family: 'Segoe UI', 'Roboto', system-ui, -apple-system, sans-serif;
+            font-family: 'Segoe UI', 'Roboto', system-ui, sans-serif;
             color: var(--text-dark);
             font-size: 0.9rem;
+        }
+        /* Основной контейнер — шире */
+        .container {
+            max-width: 1400px;   /* было 1200px в Bootstrap */
+            width: 95%;
+            margin: 0 auto;
+        }
+        /* На больших экранах ещё шире */
+        @media (min-width: 1600px) {
+            .container {
+                max-width: 1550px;
+            }
         }
         .navbar {
             background-color: var(--card-white) !important;
@@ -36,7 +48,6 @@
         .nav-link {
             color: var(--text-muted) !important;
             font-weight: 500;
-            transition: color 0.2s;
         }
         .nav-link:hover {
             color: var(--primary) !important;
@@ -45,49 +56,53 @@
             border: none;
             border-radius: 1rem;
             background-color: var(--card-white);
-            box-shadow: 0 2px 6px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.02);
+            box-shadow: 0 2px 6px rgba(0,0,0,0.04);
             margin-bottom: 1.5rem;
-            transition: box-shadow 0.2s;
-        }
-        .card:hover {
-            box-shadow: 0 8px 20px rgba(0,0,0,0.05);
         }
         .card-header {
             background-color: transparent;
             border-bottom: 1px solid var(--border-light);
             font-weight: 600;
             padding: 1rem 1.5rem;
-            font-size: 1rem;
-            color: var(--text-dark);
         }
+        /* Таблицы: делаем компактнее, но читаемо */
         .table {
             font-size: 0.85rem;
-            color: var(--text-dark);
+            margin-bottom: 0;
         }
         .table th {
             font-weight: 600;
             color: var(--text-muted);
             border-bottom: 1px solid var(--border-light);
             background-color: #fefefe;
-            padding: 0.75rem;
+            padding: 0.75rem 0.75rem;
+            white-space: nowrap;
         }
         .table td {
-            padding: 0.75rem;
+            padding: 0.75rem 0.75rem;
             vertical-align: middle;
             border-top: 1px solid #f0f2f5;
+            word-break: break-word;
+        }
+        /* Для длинных текстов в ячейках – перенос слов и максимум ширины */
+        .table td {
+            max-width: 250px;
         }
         .table-hover tbody tr:hover {
             background-color: var(--hover-gray);
+        }
+        /* Обёртка с прокруткой – сохраняем, чтобы на малых экранах не ломалось */
+        .table-responsive {
+            overflow-x: auto;
+            border-radius: 1rem;
         }
         .btn {
             border-radius: 0.6rem;
             font-weight: 500;
             padding: 0.4rem 1.2rem;
-            transition: all 0.2s;
         }
         .btn-sm {
             padding: 0.25rem 0.7rem;
-            font-size: 0.75rem;
         }
         .btn-primary {
             background-color: var(--primary);
@@ -95,69 +110,21 @@
         }
         .btn-primary:hover {
             background-color: var(--primary-dark);
-            border-color: var(--primary-dark);
-            transform: translateY(-1px);
-        }
-        .btn-outline-primary {
-            color: var(--primary);
-            border-color: #cbdbe0;
-        }
-        .btn-outline-primary:hover {
-            background-color: var(--primary-light);
-            color: var(--primary-dark);
-            border-color: #b0c4de;
-        }
-        .badge {
-            font-weight: 500;
-            padding: 0.3em 0.7em;
-            border-radius: 2rem;
-            background-color: #eef2f6;
-            color: var(--text-muted);
-        }
-        .alert {
-            border-radius: 0.8rem;
-            border: none;
-            background-color: #fefefe;
-            border-left: 4px solid;
-            box-shadow: 0 1px 2px rgba(0,0,0,0.03);
-        }
-        .alert-success {
-            border-left-color: #48bb78;
-            background-color: #f0fdf4;
-            color: #2c5e3a;
-        }
-        .alert-danger {
-            border-left-color: #f56565;
-            background-color: #fff5f5;
-            color: #9b2c2c;
-        }
-        .alert-warning {
-            border-left-color: #ed8936;
-            background-color: #fffaf0;
-            color: #7b4a1e;
         }
         .form-control, .form-select {
             border-radius: 0.6rem;
             border: 1px solid #e2e8f0;
-            background-color: #ffffff;
             font-size: 0.875rem;
             padding: 0.5rem 0.8rem;
-            transition: all 0.2s;
         }
         .form-control:focus, .form-select:focus {
             border-color: var(--primary);
             box-shadow: 0 0 0 3px rgba(44,110,158,0.1);
-            outline: none;
         }
         .pagination .page-link {
-            color: var(--text-muted);
-            border-color: var(--border-light);
             border-radius: 0.5rem;
             margin: 0 0.2rem;
-        }
-        .pagination .page-link:hover {
-            background-color: var(--primary-light);
-            color: var(--primary);
+            color: var(--text-muted);
         }
         .pagination .active .page-link {
             background-color: var(--primary);
@@ -174,10 +141,14 @@
         }
         .badge-role {
             background-color: #e9ecef;
-            color: #2c3e50;
-            font-weight: 500;
             padding: 0.35em 0.65em;
             border-radius: 0.5rem;
+        }
+        /* Стили для выделения строк */
+        .telegram-row.selected {
+            background-color: #e6f0ff;
+            outline: 1px solid var(--primary);
+            outline-offset: -1px;
         }
     </style>
 </head>
