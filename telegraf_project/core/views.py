@@ -182,12 +182,23 @@ def view_telegram(request, telegram_id):
     user_is_recipient_pending = recipient_entry is not None and recipient_entry.status == 'PENDING'
     user_recipient_id = recipient_entry.id if recipient_entry else None
     user_is_approver_pending = request.user in telegram.approvers.all() and request.user.id not in signed_approver_ids
+
+    # Проверка действительности подписи (только если телеграмма подписана)
+    signature_valid = False
+    if telegram.is_signed and telegram.signature:
+        from django.conf import settings
+        import hashlib
+        data = f"{telegram.id}{telegram.text}{telegram.author.id}{telegram.created_at.isoformat()}{settings.SECRET_KEY}"
+        computed = hashlib.sha256(data.encode()).hexdigest()
+        signature_valid = (computed == telegram.signature)
+
     return render(request, 'core/view_telegram.html', {
         'telegram': telegram,
         'signed_approver_ids': signed_approver_ids,
         'user_is_recipient_pending': user_is_recipient_pending,
         'user_recipient_id': user_recipient_id,
         'user_is_approver_pending': user_is_approver_pending,
+        'signature_valid': signature_valid,  # передаём в шаблон
     })
 
 # Модуль оператора (только для роли OPERATOR)
@@ -394,30 +405,61 @@ def edit_telegram(request, pk):
     
     if request.method == 'POST':
         telegram.text = request.POST.get('text')
-        recipient_ids = request.POST.getlist('recipients')
-        approver_ids = request.POST.getlist('approvers')
+        # Получатели: строка с ID через запятую
+        recipients_str = request.POST.get('recipients', '')
+        recipient_ids = [int(id) for id in recipients_str.split(',') if id] if recipients_str else []
+        # Подписанты
+        approvers_str = request.POST.get('approvers', '')
+        approver_ids = [int(id) for id in approvers_str.split(',') if id] if approvers_str else []
+        
         # Обновляем получателей
         telegram.recipients.all().delete()
         for uid in recipient_ids:
             TelegramRecipient.objects.create(telegram=telegram, user_id=uid, status='PENDING')
+        
         # Обновляем подписантов
         if telegram.requires_approval:
             telegram.approvers.set(approver_ids)
-        # Сбрасываем подпись
+            # Также добавим подписантов в получатели, если требуется (логика как при создании)
+            for aid in approver_ids:
+                TelegramRecipient.objects.get_or_create(telegram=telegram, user_id=aid, defaults={'status': 'PENDING'})
+        else:
+            telegram.approvers.clear()
+        
+        # Сбрасываем подпись, так как текст или состав подписантов изменился
         telegram.is_signed = False
         telegram.signature = None
         telegram.signed_at = None
         telegram.save()
+        
         messages.success(request, 'Телеграмма обновлена.')
         return redirect('telegram_journal')
     
-    all_users = User.objects.filter(role='USER').select_related('department')
-    all_approvers = User.objects.filter(role='ADMIN')
-    telegram.recipients_users = [r.user for r in telegram.recipients.all()]
+    # Подготовка данных для JSON-скриптов (получатели)
+    recipients_data = []
+    for recipient in telegram.recipients.select_related('user__department', 'user__position').all():
+        user = recipient.user
+        recipients_data.append({
+            'id': user.id,
+            'deptId': user.department.id if user.department else None,
+            'deptName': user.department.name if user.department else '',
+            'displayName': f"{user.position.name if user.position else 'Без должности'} ({user.full_name or user.username})"
+        })
+    
+    # Подготовка данных для подписантов
+    approvers_data = []
+    for approver in telegram.approvers.select_related('department', 'position').all():
+        approvers_data.append({
+            'id': approver.id,
+            'deptId': approver.department.id if approver.department else None,
+            'deptName': approver.department.name if approver.department else '',
+            'displayName': f"{approver.position.name if approver.position else 'Без должности'} ({approver.full_name or approver.username})"
+        })
+    
     return render(request, 'core/edit_telegram.html', {
         'telegram': telegram,
-        'all_users': all_users,
-        'all_approvers': all_approvers,
+        'recipients_data_json': recipients_data,
+        'approvers_data_json': approvers_data,
     })
 
 @login_required
@@ -477,6 +519,7 @@ def sign_telegram(request, telegram_id):
     if telegram.all_approvers_signed():
         telegram.is_signed = True
         telegram.signed_at = timezone.now()
+        # ВАЖНО: статус должен остаться SIGNED, а не SENT
         telegram.status = Telegram.Status.SIGNED
         # Генерация ЭЦП
         from django.conf import settings
@@ -484,10 +527,9 @@ def sign_telegram(request, telegram_id):
         data = f"{telegram.id}{telegram.text}{telegram.author.id}{telegram.created_at.isoformat()}{settings.SECRET_KEY}"
         telegram.signature = hashlib.sha256(data.encode()).hexdigest()
         telegram.save()
-        telegram.status = Telegram.Status.SENT
-        telegram.save()
         messages.success(request, 'Телеграмма полностью подписана и отправлена получателям.')
     else:
+        telegram.save()  # сохраняем дополнительную подпись, но статус пока не меняем
         messages.success(request, 'Ваша подпись сохранена.')
     return redirect('home')
 
