@@ -30,6 +30,7 @@ from django.contrib.auth.views import LoginView
 from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.forms import PasswordChangeForm
 from .forms import UserProfileForm
+import json
 
 def admin_required(view_func):
     decorated = user_passes_test(lambda u: u.is_authenticated and u.role == 'ADMIN')
@@ -291,13 +292,11 @@ def telegram_journal(request):
     if user.role == 'ADMIN':
         telegrams = Telegram.objects.all()
     elif user.role == 'OPERATOR':
-        # Получаем подразделения, входящие в зону оператора
         try:
             zone = OperatorZone.objects.get(operator=user)
             departments_in_zone = zone.departments.all()
         except OperatorZone.DoesNotExist:
             departments_in_zone = []
-        # Телеграммы, где отправитель или получатель в зоне оператора
         telegrams = Telegram.objects.filter(
             Q(author__department__in=departments_in_zone) |
             Q(recipients__user__department__in=departments_in_zone)
@@ -305,14 +304,39 @@ def telegram_journal(request):
     else:  # USER
         telegrams = Telegram.objects.filter(Q(author=user) | Q(recipients__user=user)).distinct()
 
-    # Вкладки (входящие/исходящие) – для всех ролей
+    # ----- НОВАЯ ФИЛЬТРАЦИЯ (вместо старых вкладок) -----
     type_filter = request.GET.get('type')
-    if type_filter == 'incoming':
-        telegrams = telegrams.filter(recipients__user=user).distinct()
-    elif type_filter == 'outgoing':
-        telegrams = telegrams.filter(author=user)
+    incoming_status = request.GET.get('status')    # 'new' или 'read'
+    outgoing_stage = request.GET.get('stage')      # 'create', 'approval', 'signature', 'delivery', 'delivered'
 
-    # Фильтры из формы
+    if type_filter == 'incoming':
+        # только телеграммы, где пользователь является получателем
+        telegrams = telegrams.filter(recipients__user=user).distinct()
+        if incoming_status == 'new':
+            telegrams = telegrams.filter(recipients__status='PENDING')
+        elif incoming_status == 'read':
+            telegrams = telegrams.filter(recipients__status='READ')
+    elif type_filter == 'outgoing':
+        # только телеграммы, где пользователь — автор
+        telegrams = telegrams.filter(author=user)
+        if outgoing_stage == 'create':
+            # если у вас есть черновики (статус DRAFT)
+            telegrams = telegrams.filter(status='DRAFT')
+        elif outgoing_stage == 'approval':
+            # ожидает подписи (требуется подпись, но ещё не подписана)
+            telegrams = telegrams.filter(requires_approval=True, is_signed=False)
+        elif outgoing_stage == 'signature':
+            # подписана (статус SIGNED)
+            telegrams = telegrams.filter(status='SIGNED')
+        elif outgoing_stage == 'delivery':
+            # отправлена, но не все получатели прочитали
+            telegrams = telegrams.filter(status='SENT')
+        elif outgoing_stage == 'delivered':
+            # прочитана всеми получателями
+            telegrams = telegrams.filter(status='READ')
+    # Если type не задан — показываем все доступные телеграммы (например, входящие новые по умолчанию)
+
+    # ---- Остальные фильтры (дата, номер, подразделение) ----
     form = TelegramFilterForm(request.GET)
     if form.is_valid():
         data = form.cleaned_data
@@ -334,18 +358,24 @@ def telegram_journal(request):
     paginator = Paginator(telegrams, 20)
     page_obj = paginator.get_page(request.GET.get('page'))
 
-    # Добавляем поля для отображения в таблице
+    # Дополнительные поля для отображения в таблице
     for t in page_obj:
         t.author_department = t.author.department.name if t.author.department else '—'
         t.recipient_departments = list(set(r.user.department.name for r in t.recipients.all() if r.user.department))
         t.approver_departments = list(set(a.department.name for a in t.approvers.all() if a.department)) if t.requires_approval else []
+
+    # Счётчики для входящих
+    new_count = TelegramRecipient.objects.filter(user=user, status='PENDING').count()
+    read_count = TelegramRecipient.objects.filter(user=user, status='READ').count()
 
     departments = Department.objects.all()
     return render(request, 'core/journal.html', {
         'page_obj': page_obj,
         'form': form,
         'departments': departments,
-        'user_role': user.role,  # передаём роль в шаблон
+        'user_role': user.role,
+        'new_count': new_count,
+        'read_count': read_count,
     })
 
 def export_telegrams_excel(request):
@@ -1000,3 +1030,42 @@ def approvers_tree(request):
     ]
     
     return JsonResponse(data, safe=False)
+
+@login_required
+def send_telegram(request):
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'message': 'Метод не разрешён'}, status=405)
+    try:
+        data = json.loads(request.body)
+        ids = data.get('ids', [])
+        if not ids:
+            return JsonResponse({'success': False, 'message': 'Не выбраны телеграммы'})
+        telegrams = Telegram.objects.filter(id__in=ids, author=request.user, status='DRAFT')
+        count = telegrams.count()
+        telegrams.update(status=Telegram.Status.SENT)
+        return JsonResponse({'success': True, 'message': f'Отправлено {count} телеграмм'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'message': str(e)})
+
+@login_required
+def reset_to_draft(request):
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'message': 'Метод не разрешён'}, status=405)
+    try:
+        data = json.loads(request.body)
+        ids = data.get('ids', [])
+        if not ids:
+            return JsonResponse({'success': False, 'message': 'Не выбраны телеграммы'})
+        telegrams = Telegram.objects.filter(id__in=ids, author=request.user)
+        count = 0
+        for tg in telegrams:
+            tg.status = Telegram.Status.DRAFT
+            tg.is_signed = False
+            tg.signature = None
+            tg.signed_at = None
+            tg.signatures.all().delete()
+            tg.save()
+            count += 1
+        return JsonResponse({'success': True, 'message': f'Сброшено {count} телеграмм'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'message': str(e)})

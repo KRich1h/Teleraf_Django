@@ -40,6 +40,7 @@ class Telegram(models.Model):
         URGENT = 'URGENT', 'Срочная'
 
     class Status(models.TextChoices):
+        DRAFT = 'DRAFT', 'Черновик'          # <-- добавлено
         SENT = 'SENT', 'Отправлена'
         READ = 'READ', 'Прочитана'
         SIGNED = 'SIGNED', 'Подписана'
@@ -48,14 +49,14 @@ class Telegram(models.Model):
     author = models.ForeignKey(User, on_delete=models.CASCADE, related_name='authored_telegrams', verbose_name='Автор')
     text = models.TextField(verbose_name='Текст телеграммы')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='Дата создания')
-    status = models.CharField(max_length=10, choices=Status.choices, default=Status.SENT, verbose_name='Общий статус')
+    status = models.CharField(max_length=10, choices=Status.choices, default=Status.DRAFT, verbose_name='Общий статус')  # изменено default на DRAFT
     priority = models.CharField(max_length=10, choices=Priority.choices, default=Priority.NORMAL, verbose_name='Приоритет')
     
     requires_approval = models.BooleanField(default=False, verbose_name='Требуется подпись')
     approvers = models.ManyToManyField(User, related_name='telegrams_to_approve', blank=True, verbose_name='Подписанты')
     is_signed = models.BooleanField(default=False, verbose_name='Подписана')
     signed_at = models.DateTimeField(null=True, blank=True, verbose_name='Дата подписи')
-    signature = models.CharField(max_length=128, blank=True, null=True, verbose_name='Электронная подпись')   # <-- добавлено
+    signature = models.CharField(max_length=128, blank=True, null=True, verbose_name='Электронная подпись')
 
     def all_recipients_read(self):
         return self.recipients.exclude(status='READ').count() == 0
