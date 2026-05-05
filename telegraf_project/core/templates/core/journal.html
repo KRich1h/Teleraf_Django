@@ -1,7 +1,6 @@
 ﻿{% extends 'base.html' %}
 {% block content %}
 <style>
-    /* Полный сброс контейнера */
     .container.mt-4 {
         max-width: 100% !important;
         width: 100% !important;
@@ -11,7 +10,7 @@
     body {
         background: #f1f5f9;
     }
-    /* Левая панель – только кнопки, без фона и тени */
+    /* Левая панель кнопок */
     .left-panel {
         width: 90px;
         flex-shrink: 0;
@@ -41,7 +40,7 @@
         background: #eef2ff;
         border-color: #2c6e9e;
     }
-    /* Основной контент */
+    /* Основная область */
     .main-area {
         flex-grow: 1;
         background: #f1f5f9;
@@ -96,12 +95,27 @@
         background: rgba(255,255,255,0.3);
         color: white;
     }
-    /* Таблица – отдельно, с отступом сверху */
+    /* Счётчик над таблицей */
+    .info-bar {
+        display: flex;
+        justify-content: flex-end;
+        align-items: center;
+        margin: 16px 0 12px 0;
+    }
+    .total-count {
+        background: white;
+        padding: 6px 16px;
+        border-radius: 30px;
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: #1e293b;
+        border: 1px solid #e2e8f0;
+    }
+    /* Таблица и центрирование */
     .table-wrapper {
-        margin-top: 24px;
         background: white;
         border-radius: 16px;
-        overflow: hidden;
+        overflow-x: auto;
         box-shadow: 0 2px 6px rgba(0,0,0,0.04);
         border: 1px solid #e9edf2;
     }
@@ -109,16 +123,34 @@
         width: 100%;
         border-collapse: collapse;
         font-size: 0.85rem;
+        min-width: 900px;
     }
     .journal-table th,
     .journal-table td {
         border: 1px solid #dee2e6 !important;
         padding: 10px 8px !important;
         vertical-align: middle;
+        text-align: center !important;   /* Центрирование всех ячеек и заголовков */
     }
     .journal-table th {
         background-color: #f8f9fc;
         font-weight: 600;
+    }
+    /* Иконка адресатов */
+    .recipient-icon {
+        cursor: pointer;
+        color: #2c6e9e;
+        font-size: 1.3rem;
+    }
+    /* Иконки согласования */
+    .approval-icon {
+        font-size: 1.3rem;
+        display: inline-block;
+        margin-bottom: 4px;
+    }
+    .approval-counter {
+        font-size: 0.7rem;
+        color: #334155;
     }
     /* Статусы */
     .badge-status {
@@ -127,13 +159,14 @@
         font-size: 0.75rem;
         display: inline-block;
     }
-    .status-sent { background: #0d6efd; color: white; }
-    .status-read { background: #198754; color: white; }
-    .status-signed { background: #ffc107; color: black; }
     .status-draft { background: #6c757d; color: white; }
-    .status-delivered { background: #20c997; color: white; }
     .status-approval { background: #fd7e14; color: white; }
-    /* Выделение строк */
+    .status-signature { background: #0d6efd; color: white; }
+    .status-signed { background: #198754; color: white; }
+    .status-sent { background: #0dcaf0; color: black; }
+    .status-delivered { background: #20c997; color: white; }
+    .status-rejected { background: #dc3545; color: white; }
+    /* Выделение строки */
     .telegram-row.selected {
         background-color: #eef4ff;
         outline: 1px solid #2c6e9e;
@@ -142,10 +175,34 @@
     .pagination {
         margin-top: 24px;
     }
+    /* Модальное окно */
+    .modal-recipients {
+        display: none;
+        position: fixed;
+        z-index: 1050;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0,0,0,0.5);
+    }
+    .modal-content-recipients {
+        background-color: white;
+        margin: 10% auto;
+        padding: 20px;
+        border-radius: 16px;
+        width: 400px;
+        max-width: 90%;
+    }
+    .close-modal {
+        float: right;
+        font-size: 1.5rem;
+        cursor: pointer;
+    }
 </style>
 
 <div style="display: flex; min-height: calc(100vh - 120px);">
-    <!-- ЛЕВАЯ ПАНЕЛЬ (просто кнопки, без фона и тени) -->
+    <!-- Левая панель кнопок -->
     <div class="left-panel">
         <button class="action-btn" id="toggleFilterBtn" title="Фильтры" data-bs-toggle="tooltip" data-bs-placement="right">
             <i class="bi bi-funnel"></i>
@@ -176,9 +233,9 @@
         </a>
     </div>
 
-    <!-- Основной контент -->
+    <!-- Основная область -->
     <div class="main-area">
-        <!-- Скрываемые доп. фильтры -->
+        <!-- Дополнительные фильтры (скрытые) -->
         <div class="collapse" id="filterCollapse">
             <div class="bg-light p-3 rounded mb-3">
                 <form method="get" id="filterForm" class="row g-3">
@@ -206,7 +263,7 @@
             </div>
         </div>
 
-        <!-- Две карточки фильтров (Входящие/Исходящие) -->
+        <!-- Карточки Входящие / Исходящие -->
         <div style="display: flex; gap: 20px;">
             <div class="filter-card" style="flex:1;">
                 <div class="filter-title">📥 Входящие</div>
@@ -231,7 +288,12 @@
             </div>
         </div>
 
-        <!-- Таблица -->
+        <!-- Счётчик -->
+        <div class="info-bar">
+            <div class="total-count">📊 Всего телеграмм: {{ page_obj.paginator.count }}</div>
+        </div>
+
+        <!-- ТАБЛИЦА (всё по центру) -->
         <div class="table-wrapper">
             <form id="telegramForm" method="post">
                 {% csrf_token %}
@@ -239,46 +301,71 @@
                     <thead>
                         <tr>
                             <th>Системный номер</th>
-                            <th>Дата создания</th>
                             <th>Отправитель</th>
                             <th>Адресаты</th>
-                            <th style="text-align:center">Сотл.</th>
-                            <th style="text-align:center">Виза</th>
+                            <th>Согласование</th>
                             <th>Подписание</th>
-                            <th>Категория</th>
                             <th>Статус</th>
                             <th>Исполнитель</th>
-                            <th>Код по БК</th>
                         </tr>
                     </thead>
                     <tbody>
                         {% for telegram in page_obj %}
                         <tr data-id="{{ telegram.id }}" class="telegram-row">
-                            <td><a href="{% url 'view_telegram' telegram.id %}">{{ telegram.number|default:"—" }}</a></td>
-                            <td>{{ telegram.created_at|date:"d.m.Y H:i" }}</td>
+                            <!-- Системный номер -->
+                            <td>
+                                <span style="color: #000; font-weight: 500;">ТГ-{{ telegram.id }}</span><br>
+                                <span class="text-muted" style="font-size:0.7rem;">{{ telegram.created_at|date:"d.m.Y H:i" }}</span>
+                            </td>
+                            <!-- Отправитель -->
                             <td>{{ telegram.author_department|default:telegram.author.get_full_name|default:telegram.author.username }}</td>
-                            <td>{% if telegram.recipient_departments %}{{ telegram.recipient_departments|join:", " }}{% else %}—{% endif %}</td>
-                            <td class="text-center">
-                                {% if user in telegram.recipients_users %}
-                                    {% for rec in telegram.recipients.all %}
-                                        {% if rec.user == user and rec.status == 'READ' %}<i class="bi bi-check-lg text-success"></i>
-                                        {% elif rec.user == user and rec.status == 'PENDING' %}<i class="bi bi-envelope text-secondary"></i>{% endif %}
-                                    {% endfor %}
-                                {% else %}—{% endif %}
+                            <!-- Адресаты (иконка) -->
+                            <td>
+                                <i class="bi bi-people-fill recipient-icon" data-recipients='{{ telegram.recipient_departments|join:"||" }}' onclick="showRecipients(this)"></i>
                             </td>
-                            <td class="text-center">
-                                {% if telegram.requires_approval and telegram.is_signed %}<i class="bi bi-pen-fill text-primary"></i>
-                                {% elif telegram.requires_approval and not telegram.is_signed %}<i class="bi bi-hourglass text-warning"></i>
-                                {% else %}—{% endif %}
+                            <!-- Согласование (иконка + счётчик) -->
+                            <td>
+                                {% with total=telegram.approver_departments|length %}
+                                {% if total > 0 %}
+                                    {% if total == 1 %}
+                                        <i class="bi bi-person approval-icon"></i>
+                                    {% else %}
+                                        <i class="bi bi-people approval-icon"></i>
+                                    {% endif %}
+                                    <div class="approval-counter">
+                                        {% with received=telegram.approval_count|default:0 %}{{ received }}/{{ total }}{% endwith %}
+                                    </div>
+                                {% endif %}
+                                {% endwith %}
                             </td>
-                            <td>{% if telegram.requires_approval %}{{ telegram.approver_departments|join:", "|default:"—" }}{% else %}—{% endif %}</td>
-                            <td>{% if telegram.priority == 'URGENT' %}<span class="badge bg-danger">Срочная</span>{% else %}<span class="badge bg-secondary">Обычная</span>{% endif %}</td>
-                            <td>{% with status=telegram.status|lower %}<span class="badge-status status-{{ status }}">{{ telegram.get_status_display }}</span>{% endwith %}</td>
-                            <td>{{ telegram.author.full_name|default:telegram.author.username }}</td>
-                            <td class="text-center">—</td>
+                            <!-- Подписание -->
+                            <td>
+                                {% if telegram.is_signed and telegram.signer_department %}
+                                    <div>{{ telegram.signer_department }}</div>
+                                    <div class="small text-muted">{{ telegram.signed_at|date:"d.m.Y H:i"|default:"" }}</div>
+                                {% endif %}
+                            </td>
+                            <!-- Статус -->
+                            <td>
+                                {% with status=telegram.status|lower %}
+                                <span class="badge-status 
+                                    {% if status == 'draft' %}status-draft
+                                    {% elif status == 'approval' or status == 'на согласовании' %}status-approval
+                                    {% elif status == 'signature' or status == 'на подписании' %}status-signature
+                                    {% elif status == 'signed' or status == 'подписано' %}status-signed
+                                    {% elif status == 'sent' or status == 'отправлена' %}status-sent
+                                    {% elif status == 'delivered' or status == 'доставлено' %}status-delivered
+                                    {% elif status == 'rejected' or status == 'отказ' %}status-rejected
+                                    {% else %}status-draft{% endif %}">
+                                    {{ telegram.get_status_display }}
+                                </span>
+                                {% endwith %}
+                            </td>
+                            <!-- Исполнитель -->
+                            <td>{{ telegram.executor|default:telegram.author.full_name|default:telegram.author.username }}</td>
                         </tr>
                         {% empty %}
-                        <tr><td colspan="11" class="text-center py-4">Нет телеграмм</td></tr>
+                        <tr><td colspan="7" class="text-center py-4">Нет телеграмм</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -305,7 +392,17 @@
     </div>
 </div>
 
+<!-- Модальное окно для адресатов -->
+<div id="recipientModal" class="modal-recipients">
+    <div class="modal-content-recipients">
+        <span class="close-modal" onclick="closeModal()">&times;</span>
+        <h5>Получатели</h5>
+        <ul id="recipientList" style="list-style: none; padding-left: 0;"></ul>
+    </div>
+</div>
+
 <script>
+    // Выделение строк для массовых операций
     const rows = document.querySelectorAll('.telegram-row');
     const selectedIdsInput = document.getElementById('selectedIds');
     let selected = new Set();
@@ -316,7 +413,7 @@
 
     rows.forEach(row => {
         row.addEventListener('click', function(e) {
-            if (e.target.tagName === 'A') return;
+            if (e.target.tagName === 'A' || e.target.classList.contains('recipient-icon')) return;
             const id = this.getAttribute('data-id');
             if (selected.has(id)) {
                 selected.delete(id);
@@ -331,14 +428,41 @@
 
     function getSelectedIds() { return Array.from(selected); }
 
+    // Модальное окно для адресатов
+    window.showRecipients = function(element) {
+        let recipientsStr = element.getAttribute('data-recipients') || '';
+        let recipients = recipientsStr ? recipientsStr.split('||') : [];
+        recipients = recipients.filter(r => r.trim() !== '');
+        const listDiv = document.getElementById('recipientList');
+        listDiv.innerHTML = '';
+        if (recipients.length === 0) {
+            listDiv.innerHTML = '<li>Нет адресатов</li>';
+        } else {
+            recipients.forEach(r => {
+                let li = document.createElement('li');
+                li.textContent = r;
+                listDiv.appendChild(li);
+            });
+        }
+        document.getElementById('recipientModal').style.display = 'block';
+    }
+
+    window.closeModal = function() {
+        document.getElementById('recipientModal').style.display = 'none';
+    }
+
+    window.onclick = function(event) {
+        if (event.target === document.getElementById('recipientModal')) closeModal();
+    }
+
+    // Действия левых кнопок
     document.getElementById('toggleFilterBtn')?.addEventListener('click', () => {
         document.getElementById('filterCollapse')?.classList.toggle('show');
     });
-
     document.getElementById('viewSelectedBtn')?.addEventListener('click', () => {
         const ids = getSelectedIds();
         if (ids.length !== 1) return alert('Выберите ровно одну телеграмму');
-        window.location.href = `/view/${ids[0]}/`;
+        window.location.href = `/telegram/${ids[0]}/`;
     });
     document.getElementById('sendSelectedBtn')?.addEventListener('click', () => {
         const ids = getSelectedIds();

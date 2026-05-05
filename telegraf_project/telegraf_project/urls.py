@@ -48,4 +48,6 @@ urlpatterns = [
     path('profile/', views.profile, name='profile'),
     path('api/departments-with-users/', views.departments_with_users, name='departments_with_users'),
     path('api/approvers-tree/', views.approvers_tree, name='approvers_tree'),
+    path('send-telegram/', views.send_telegram, name='send_telegram'),
+    path('reset-to-draft/', views.reset_to_draft, name='reset_to_draft'),
 ]
