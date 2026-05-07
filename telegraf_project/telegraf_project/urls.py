@@ -19,7 +19,6 @@ urlpatterns = [
     path('print/<int:pk>/', views.print_telegram, name='print_telegram'),
     path('mark-as-read/<int:recipient_id>/', views.mark_as_read, name='mark_as_read'),
     path('mark-as-read-and-view/<int:recipient_id>/', views.mark_as_read_and_view, name='mark_as_read_and_view'),
-    path('telegram/<int:telegram_id>/sign/', views.sign_telegram, name='sign_telegram'),
     path('departments/', views.department_list, name='department_list'),
     path('departments/create/', views.department_create, name='department_create'),
     path('departments/<int:pk>/edit/', views.department_edit, name='department_edit'),
@@ -50,4 +49,11 @@ urlpatterns = [
     path('api/approvers-tree/', views.approvers_tree, name='approvers_tree'),
     path('send-telegram/', views.send_telegram, name='send_telegram'),
     path('reset-to-draft/', views.reset_to_draft, name='reset_to_draft'),
+        # Управление статусами телеграмм (согласование, подписание, доставка, отказ)
+    path('telegram/<int:pk>/send-to-approval/', views.send_to_approval, name='send_to_approval'),
+    path('telegram/<int:pk>/approve/', views.approve_telegram, name='approve_telegram'),
+    path('telegram/<int:pk>/send-to-signature/', views.send_to_signature, name='send_to_signature'),
+    path('telegram/<int:pk>/sign/', views.sign_telegram, name='sign_telegram'),
+    path('telegram/<int:pk>/send-to-delivery/', views.send_telegram_to_delivery, name='send_telegram_to_delivery'),
+    path('telegram/<int:pk>/reject/', views.reject_telegram, name='reject_telegram'),
 ]
