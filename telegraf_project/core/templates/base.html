@@ -23,13 +23,11 @@
             color: var(--text-dark);
             font-size: 0.9rem;
         }
-        /* Основной контейнер — шире */
         .container {
-            max-width: 1400px;   /* было 1200px в Bootstrap */
+            max-width: 1400px;
             width: 95%;
             margin: 0 auto;
         }
-        /* На больших экранах ещё шире */
         @media (min-width: 1600px) {
             .container {
                 max-width: 1550px;
@@ -65,7 +63,6 @@
             font-weight: 600;
             padding: 1rem 1.5rem;
         }
-        /* Таблицы: делаем компактнее, но читаемо */
         .table {
             font-size: 0.85rem;
             margin-bottom: 0;
@@ -83,15 +80,11 @@
             vertical-align: middle;
             border-top: 1px solid #f0f2f5;
             word-break: break-word;
-        }
-        /* Для длинных текстов в ячейках – перенос слов и максимум ширины */
-        .table td {
             max-width: 250px;
         }
         .table-hover tbody tr:hover {
             background-color: var(--hover-gray);
         }
-        /* Обёртка с прокруткой – сохраняем, чтобы на малых экранах не ломалось */
         .table-responsive {
             overflow-x: auto;
             border-radius: 1rem;
@@ -144,7 +137,6 @@
             padding: 0.35em 0.65em;
             border-radius: 0.5rem;
         }
-        /* Стили для выделения строк */
         .telegram-row.selected {
             background-color: #e6f0ff;
             outline: 1px solid var(--primary);
@@ -170,6 +162,9 @@
                 <li class="nav-item"><a class="nav-link" href="{% url 'reports' %}"><i class="bi bi-graph-up"></i> Отчёты</a></li>
                 {% endif %}
                 <li class="nav-item"><a class="nav-link" href="{% url 'profile' %}"><i class="bi bi-person"></i> Личный кабинет</a></li>
+                {% if request.user.role == 'ADMIN' %}
+                <li class="nav-item"><a class="nav-link" href="/admin/"><i class="bi bi-shield-lock"></i> Админка</a></li>
+                {% endif %}
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" id="nsidropdown" role="button" data-bs-toggle="dropdown"><i class="bi bi-database"></i> НСИ</a>
                     <ul class="dropdown-menu">

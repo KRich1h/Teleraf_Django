@@ -1,0 +1,79 @@
+﻿{% extends 'base.html' %}
+{% block content %}
+<div class="row">
+    <!-- Левая колонка: описание системы -->
+    <div class="col-md-7">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-white py-3">
+                <h3 class="mb-0">АС "Телеграф"</h3>
+                <p class="text-muted mb-0">Система гарантированной доставки служебных сообщений</p>
+            </div>
+            <div class="card-body">
+                <p>Добро пожаловать в автоматизированную систему «Телеграф», предназначенную для оперативного обмена служебными документами между подразделениями организации.</p>
+                <p>Система обеспечивает:</p>
+                <ul>
+                    <li>создание и отправку телеграмм произвольным подразделениям-получателям;</li>
+                    <li>маршрутизацию документов с процедурами согласования и электронной подписи;</li>
+                    <li>контроль доставки и прочтения каждого сообщения;</li>
+                    <li>ведение детального журнала всех операций.</li>
+                </ul>
+                <hr>
+                <p class="small text-muted">© 2025 АС "Телеграф" — все права защищены.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Правая колонка: вход или приветствие -->
+    <div class="col-md-5">
+        {% if not user.is_authenticated %}
+            <!-- Неавторизованные: форма входа -->
+            <div class="card shadow-sm">
+                <div class="card-header bg-white text-center py-3">
+                    <h4 class="mb-0"><i class="bi bi-box-arrow-in-right"></i> Вход в систему</h4>
+                </div>
+                <div class="card-body">
+                    <form method="post" action="{% url 'login' %}">
+                        {% csrf_token %}
+                        <div class="mb-3">
+                            <label class="form-label">Логин</label>
+                            <input type="text" name="username" class="form-control" required autofocus>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Пароль</label>
+                            <input type="password" name="password" class="form-control" required>
+                        </div>
+                        <button type="submit" class="btn btn-primary w-100">Войти</button>
+                    </form>
+                    <hr>
+                    <div class="small text-muted text-center">
+                        Тестовые учётные записи:<br>
+                        <strong>operator</strong> / <kbd>Operator — WYH-UNL-xCN-KXt</kbd><br>
+                        <strong>user</strong> / <kbd>user_dept1_1 — password123</kbd>
+                    </div>
+                </div>
+            </div>
+        {% else %}
+            <!-- Авторизованные: приветствие с ролью и именем -->
+            <div class="card shadow-sm text-center">
+                <div class="card-header bg-white py-3">
+                    <h4 class="mb-0"><i class="bi bi-person-circle"></i> Добро пожаловать!</h4>
+                </div>
+                <div class="card-body">
+                    <p class="fs-5">
+                        <strong>{{ user.full_name|default:user.username }}</strong>
+                    </p>
+                    <p class="mb-0">
+                        <span class="badge bg-primary fs-6 px-3 py-2">
+                            {% if user.role == 'ADMIN' %}Администратор
+                            {% elif user.role == 'OPERATOR' %}Оператор
+                            {% else %}Абонент{% endif %}
+                        </span>
+                    </p>
+                    <hr>
+                    <p class="text-muted small">Вы успешно вошли в систему</a>.</p>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
