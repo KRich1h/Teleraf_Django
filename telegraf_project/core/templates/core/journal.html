@@ -41,7 +41,9 @@
     .journal-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; min-width: 900px; }
     .journal-table th, .journal-table td { border: 1px solid #dee2e6 !important; padding: 10px 8px !important; vertical-align: middle; text-align: center; }
     .journal-table th { background-color: #f8f9fc; font-weight: 600; }
-    .recipient-icon, .eye-icon, .approval-modal-icon, .signer-info-icon { cursor: pointer; color: #2c6e9e; font-size: 1.1rem; margin-left: 6px; }
+    .recipient-icon, .eye-icon, .approval-modal-icon, .signer-info-icon, .reject-reason-icon, .manage-icon { cursor: pointer; color: #2c6e9e; font-size: 1.1rem; margin-left: 6px; }
+    .manage-icon { color: #6c757d; }
+    .reject-reason-icon { color: #dc3545; }
     .approval-icon { font-size: 1.3rem; display: inline-block; margin-bottom: 4px; }
     .approval-counter { font-size: 0.7rem; color: #334155; }
     .badge-status { padding: 4px 10px; border-radius: 30px; font-size: 0.75rem; display: inline-block; }
@@ -55,18 +57,19 @@
     .status-rejected { background: #dc3545; color: white; }
     .telegram-row.selected { background-color: #eef4ff; outline: 1px solid #2c6e9e; outline-offset: -1px; }
     .pagination { margin-top: 24px; }
-    .modal-recipients, .modal-status, .modal-approvers, .modal-signer {
+    .modal-recipients, .modal-status, .modal-approvers, .modal-signer, .modal-reject-reason, .modal-manage {
         display: none; position: fixed; z-index: 1050; left: 0; top: 0;
         width: 100%; height: 100%; background-color: rgba(0,0,0,0.5);
     }
-    .modal-content-recipients, .modal-content-status, .modal-content-approvers, .modal-content-signer {
+    .modal-content-recipients, .modal-content-status, .modal-content-approvers, .modal-content-signer, .modal-content-reject-reason, .modal-content-manage {
         background-color: white; margin: 10% auto; padding: 20px;
-        border-radius: 16px; width: 600px; max-width: 90%;
+        border-radius: 16px; width: 700px; max-width: 90%;
     }
     .close-modal { float: right; font-size: 1.5rem; cursor: pointer; }
 </style>
 
 <div style="display: flex; min-height: calc(100vh - 120px);">
+    <!-- Левая панель кнопок (без изменений) -->
     <div class="left-panel">
         <button class="action-btn" id="toggleFilterBtn" title="Фильтры" data-bs-toggle="tooltip" data-bs-placement="right"><i class="bi bi-funnel"></i></button>
         <a href="{% url 'create_telegram_page' %}" class="action-btn" title="Создание" data-bs-toggle="tooltip" data-bs-placement="right"><i class="bi bi-plus-circle"></i></a>
@@ -80,6 +83,7 @@
     </div>
 
     <div class="main-area">
+        <!-- Фильтры (скрытые) -->
         <div class="collapse" id="filterCollapse">
             <div class="bg-light p-3 rounded mb-3">
                 <form method="get" id="filterForm" class="row g-3">
@@ -95,6 +99,7 @@
             </div>
         </div>
 
+        <!-- Карточки Входящие / Исходящие -->
         <div style="display: flex; gap: 20px;">
             <div class="filter-card" style="flex:1;">
                 <div class="filter-title">📥 Входящие</div>
@@ -160,17 +165,24 @@
                             </td>
                             <td>
                                 <span class="badge-status status-{{ tg.status|lower }}">{{ tg.get_status_display }}</span>
+                                {% if tg.status == 'REJECTED' and tg.rejection_reason %}
+                                    <i class="bi bi-info-circle reject-reason-icon" data-bs-toggle="modal" data-bs-target="#rejectReasonModal" data-rejection='{{ tg.rejection_data_json }}'></i>
+                                {% endif %}
                                 {% if tg.status == 'DELIVERY' or tg.status == 'DELIVERED' %}
                                     {% with progress=tg.get_read_progress %}
                                         <br><small class="text-muted">{{ progress.0 }}/{{ progress.1 }}</small>
-                                        <i class="bi bi-eye-fill eye-icon" data-bs-toggle="modal" data-bs-target="#statusModal" data-status='{{ tg.recipients_status_json }}'></i>
+                                        {% if user.role == 'OPERATOR' %}
+                                            <i class="bi bi-card-list manage-icon" data-bs-toggle="modal" data-bs-target="#manageModal" data-telegram-id="{{ tg.id }}" data-telegram-status="{{ tg.status }}" data-recipients='{{ tg.recipients_manage_json }}'></i>
+                                        {% else %}
+                                            <i class="bi bi-eye-fill eye-icon" data-bs-toggle="modal" data-bs-target="#statusModal" data-status='{{ tg.recipients_status_json }}'></i>
+                                        {% endif %}
                                     {% endwith %}
                                 {% endif %}
                             </td>
                             <td>{{ tg.author.full_name|default:tg.author.username }}</td>
                         </tr>
                         {% empty %}
-                        <tr><td colspan="7" class="text-center py-4">Нет телеграмм</td></tr>
+                        <td><td colspan="7" class="text-center py-4">Нет телеграмм</td></table>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -199,62 +211,46 @@
     </div>
 </div>
 
-<!-- Модальное окно для статуса прочтения -->
+<!-- Модальное окно для статуса прочтения (обычные пользователи) -->
 <div class="modal fade" id="statusModal" tabindex="-1" aria-labelledby="statusModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="statusModalLabel">Статус прочтения</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
+            <div class="modal-header"><h5 class="modal-title">Статус прочтения</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
             <div class="modal-body">
-                <table class="table table-bordered table-sm">
-                    <thead><tr><th>Отдел</th><th>Получатель</th><th>Статус</th><th>Дата прочтения</th></tr></thead>
-                    <tbody id="statusModalBody"><tr><td colspan="4" class="text-center">Нет данных</td></tr></tbody>
-                </table>
+                <table class="table table-bordered table-sm"><thead><tr><th>Отдел</th><th>Получатель</th><th>Статус</th><th>Дата прочтения</th></tr></thead><tbody id="statusModalBody"></tbody></table>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
-            </div>
+            <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button></div>
         </div>
     </div>
 </div>
 
 <!-- Модальное окно для согласующих -->
 <div class="modal fade" id="approversModal" tabindex="-1" aria-labelledby="approversModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="approversModalLabel">Согласующие</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body">
-                <table class="table table-bordered table-sm">
-                    <thead><tr><th>Отдел</th><th>Сотрудник</th><th>Статус</th><th>Дата согласования</th></tr></thead>
-                    <tbody id="approversModalBody"><tr><td colspan="4" class="text-center">Нет данных</td></tr></tbody>
-                </table>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
-            </div>
-        </div>
-    </div>
+    <div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Согласующие</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><table class="table table-bordered table-sm"><thead><tr><th>Отдел</th><th>Сотрудник</th><th>Статус</th><th>Дата согласования</th></tr></thead><tbody id="approversModalBody"></tbody></table></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button></div></div></div>
 </div>
 
 <!-- Модальное окно для подписанта -->
 <div class="modal fade" id="signerModal" tabindex="-1" aria-labelledby="signerModalLabel" aria-hidden="true">
-    <div class="modal-dialog">
+    <div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Подписант</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="signerModalBody"></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button></div></div></div>
+</div>
+
+<!-- Модальное окно для причины отказа -->
+<div class="modal fade" id="rejectReasonModal" tabindex="-1" aria-labelledby="rejectReasonModalLabel" aria-hidden="true">
+    <div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Причина отказа</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><p><strong>Причина:</strong> <span id="rejectReasonText"></span></p><p><strong>Отказал:</strong> <span id="rejectedByText"></span></p><p><strong>Дата отказа:</strong> <span id="rejectedAtText"></span></p></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button></div></div></div>
+</div>
+
+<!-- Модальное окно для управления доставкой (оператор) -->
+<div class="modal fade" id="manageModal" tabindex="-1" aria-labelledby="manageModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
         <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title" id="signerModalLabel">Подписант</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
+            <div class="modal-header"><h5 class="modal-title">Управление доставкой</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
             <div class="modal-body">
-                <div id="signerModalBody"></div>
+                <table class="table table-bordered table-sm">
+                    <thead><tr><th>Отдел</th><th>Получатель</th><th>Статус</th><th>Дата прочтения</th><th>Уведомлён</th><th>Способ уведомления</th><th>Действия</th></tr></thead>
+                    <tbody id="manageModalBody"></tbody>
+                </table>
             </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
-            </div>
+            <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button></div>
         </div>
     </div>
 </div>
@@ -270,6 +266,21 @@
         });
     }
 
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
     // Выделение строк
     const rows = document.querySelectorAll('.telegram-row');
     const selectedIdsInput = document.getElementById('selectedIds');
@@ -277,7 +288,7 @@
     function updateSelectedIds() { selectedIdsInput.value = Array.from(selected).join(','); }
     rows.forEach(row => {
         row.addEventListener('click', function(e) {
-            if (e.target.tagName === 'A' || e.target.classList.contains('recipient-icon') || e.target.classList.contains('eye-icon') || e.target.classList.contains('approval-modal-icon') || e.target.classList.contains('signer-info-icon') || e.target.closest('.action-buttons')) return;
+            if (e.target.tagName === 'A' || e.target.classList.contains('recipient-icon') || e.target.classList.contains('eye-icon') || e.target.classList.contains('approval-modal-icon') || e.target.classList.contains('signer-info-icon') || e.target.classList.contains('reject-reason-icon') || e.target.classList.contains('manage-icon') || e.target.closest('.action-buttons')) return;
             const id = this.getAttribute('data-id');
             if (selected.has(id)) { selected.delete(id); this.classList.remove('selected'); }
             else { selected.add(id); this.classList.add('selected'); }
@@ -300,7 +311,7 @@
     window.closeModal = function() { document.getElementById('recipientModal').style.display = 'none'; }
     window.onclick = function(event) { if (event.target === document.getElementById('recipientModal')) closeModal(); }
 
-    // Статус прочтения
+    // Статус прочтения (обычные пользователи)
     const statusModal = document.getElementById('statusModal');
     if (statusModal) {
         statusModal.addEventListener('show.bs.modal', function (event) {
@@ -315,7 +326,11 @@
                         data.forEach(item => {
                             const statusText = item.status === 'READ' ? '<span class="badge bg-success">Прочитано</span>' : '<span class="badge bg-secondary">Ожидает</span>';
                             const readDate = item.read_at ? item.read_at : '—';
-                            rows += `<tr><td>${escapeHtml(item.department)}</td><td>${escapeHtml(item.full_name)}</td><td>${statusText}</td><td>${escapeHtml(readDate)}</td></tr>`;
+                            rows += `<td>${escapeHtml(item.department)}</td>
+                                        <td>${escapeHtml(item.full_name)}</td>
+                                        <td>${statusText}</td>
+                                        <td>${escapeHtml(readDate)}</td>
+                                    `;
                         });
                         tbody.innerHTML = rows;
                     } else { tbody.innerHTML = '<tr><td colspan="4" class="text-center">Нет получателей</td></tr>'; }
@@ -339,7 +354,11 @@
                         data.forEach(item => {
                             const statusText = item.status === 'APPROVED' ? '<span class="badge bg-success">Согласовано</span>' : '<span class="badge bg-secondary">Ожидает</span>';
                             const date = item.signed_at ? item.signed_at : '—';
-                            rows += `<tr><td>${escapeHtml(item.department)}</td><td>${escapeHtml(item.full_name)}</td><td>${statusText}</td><td>${escapeHtml(date)}</td></tr>`;
+                            rows += `<td>${escapeHtml(item.department)}</td>
+                                        <td>${escapeHtml(item.full_name)}</td>
+                                        <td>${statusText}</td>
+                                        <td>${escapeHtml(date)}</td>
+                                    `;
                         });
                         tbody.innerHTML = rows;
                     } else { tbody.innerHTML = '<tr><td colspan="4" class="text-center">Нет согласующих</td></tr>'; }
@@ -360,14 +379,122 @@
                     const data = JSON.parse(signerData);
                     const statusText = data.status === 'SIGNED' ? '<span class="badge bg-success">Подписано</span>' : '<span class="badge bg-secondary">Ожидает</span>';
                     const date = data.signed_at ? data.signed_at : '—';
-                    container.innerHTML = `
-                        <p><strong>ФИО:</strong> ${escapeHtml(data.full_name)}</p>
-                        <p><strong>Отдел:</strong> ${escapeHtml(data.department)}</p>
-                        <p><strong>Статус:</strong> ${statusText}</p>
-                        <p><strong>Дата подписания:</strong> ${escapeHtml(date)}</p>
-                    `;
+                    container.innerHTML = `<p><strong>ФИО:</strong> ${escapeHtml(data.full_name)}</p><p><strong>Отдел:</strong> ${escapeHtml(data.department)}</p><p><strong>Статус:</strong> ${statusText}</p><p><strong>Дата подписания:</strong> ${escapeHtml(date)}</p>`;
                 } catch(e) { container.innerHTML = '<p class="text-danger">Ошибка данных</p>'; }
             } else { container.innerHTML = '<p>Нет назначенного подписанта</p>'; }
+        });
+    }
+
+    // Причина отказа
+    const rejectReasonModal = document.getElementById('rejectReasonModal');
+    if (rejectReasonModal) {
+        rejectReasonModal.addEventListener('show.bs.modal', function (event) {
+            const button = event.relatedTarget;
+            const rejectionData = button.getAttribute('data-rejection');
+            if (rejectionData) {
+                try {
+                    const data = JSON.parse(rejectionData);
+                    document.getElementById('rejectReasonText').innerText = data.reason || 'Не указана';
+                    document.getElementById('rejectedByText').innerText = data.rejected_by || 'Неизвестно';
+                    document.getElementById('rejectedAtText').innerText = data.rejected_at || '—';
+                } catch(e) { /* ignore */ }
+            } else {
+                document.getElementById('rejectReasonText').innerText = 'Причина не указана';
+                document.getElementById('rejectedByText').innerText = '';
+                document.getElementById('rejectedAtText').innerText = '';
+            }
+        });
+    }
+
+    // Управление доставкой (оператор)
+    const manageModal = document.getElementById('manageModal');
+    if (manageModal) {
+        manageModal.addEventListener('show.bs.modal', function (event) {
+            const button = event.relatedTarget;
+            const recipientsRaw = button.getAttribute('data-recipients');
+            const telegramStatus = button.getAttribute('data-telegram-status');
+            const tbody = document.getElementById('manageModalBody');
+            if (!recipientsRaw || recipientsRaw === 'null') {
+                tbody.innerHTML = '<tr><td colspan="5" class="text-center">Нет получателей</td></tr>';
+                return;
+            }
+            try {
+                const recipients = JSON.parse(recipientsRaw);
+                if (!recipients.length) {
+                    tbody.innerHTML = '<tr><td colspan="5" class="text-center">Нет получателей</td></tr>';
+                    return;
+                }
+                let html = '';
+                // Для DELIVERED показываем только 5 колонок
+                if (telegramStatus === 'DELIVERED') {
+                    recipients.forEach(rec => {
+                        const statusBadge = rec.status === 'READ' ? '<span class="badge bg-success">Прочитано</span>' : '<span class="badge bg-secondary">Ожидает</span>';
+                        const notifiedInfo = rec.is_notified ? `Уведомлён ${rec.last_notified_at || ''}<br>${rec.delivery_method === 'PHONE' ? 'Телефон' : (rec.delivery_method === 'FAX' ? 'Факс' : (rec.delivery_method === 'EMAIL' ? 'Почта' : '—'))}` : '—';
+                        html += `<tr>
+                            <td>${escapeHtml(rec.department)}</td>
+                            <td>${escapeHtml(rec.full_name)}</td>
+                            <td>${statusBadge}</td>
+                            <td>${rec.read_at || '—'}</td>
+                            <td>${notifiedInfo}</td>
+                        </tr>`;
+                    });
+                    document.querySelector('#manageModal .modal-body table thead').innerHTML = `<tr>
+                        <th>Отдел</th><th>Получатель</th><th>Статус</th><th>Дата прочтения</th><th>Уведомлён</th>
+                    </tr>`;
+                } else {
+                    // Для DELIVERY показываем полную таблицу с управлением
+                    recipients.forEach(rec => {
+                        const statusBadge = rec.status === 'READ' ? '<span class="badge bg-success">Прочитано</span>' : '<span class="badge bg-secondary">Ожидает</span>';
+                        const notifiedBadge = rec.is_notified ? `<span class="badge bg-info">Уведомлён ${rec.last_notified_at || ''}</span>` : '—';
+                        const methodSelect = (rec.status === 'PENDING') ? `
+                            <select class="form-select form-select-sm method-select" data-id="${rec.id}" style="width: 120px;">
+                                <option value="PHONE">Телефон</option>
+                                <option value="FAX">Факс</option>
+                                <option value="EMAIL">Почта</option>
+                            </select>
+                        ` : (rec.delivery_method === 'PHONE' ? 'Телефон' : (rec.delivery_method === 'FAX' ? 'Факс' : (rec.delivery_method === 'EMAIL' ? 'Почта' : '—')));
+                        const actions = (rec.status === 'PENDING') ? `<button class="btn btn-sm btn-primary notify-btn" data-id="${rec.id}">Уведомить</button>` : '—';
+                        html += `<tr>
+                            <td>${escapeHtml(rec.department)}</td>
+                            <td>${escapeHtml(rec.full_name)}</td>
+                            <td>${statusBadge}</td>
+                            <td>${rec.read_at || '—'}</td>
+                            <td>${notifiedBadge}</td>
+                            <td>${methodSelect}</td>
+                            <td>${actions}</td>
+                        </tr>`;
+                    });
+                    document.querySelector('#manageModal .modal-body table thead').innerHTML = `<tr>
+                        <th>Отдел</th><th>Получатель</th><th>Статус</th><th>Дата прочтения</th><th>Уведомлён</th><th>Способ уведомления</th><th>Действия</th>
+                    </tr>`;
+                }
+                tbody.innerHTML = html;
+                // Привязываем обработчики только для DELIVERY (они уже есть, но нужно перепривязать)
+                if (telegramStatus !== 'DELIVERED') {
+                    document.querySelectorAll('.notify-btn').forEach(btn => {
+                        btn.addEventListener('click', function() {
+                            const recipientId = this.dataset.id;
+                            const select = document.querySelector(`.method-select[data-id="${recipientId}"]`);
+                            const method = select ? select.value : 'PHONE';
+                            fetch('/operator/notify-and-mark-read/', {
+                                method: 'POST',
+                                headers: { 'X-CSRFToken': getCookie('csrftoken'), 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ recipient_id: recipientId, method: method })
+                            }).then(res => res.json()).then(data => {
+                                if (data.success) {
+                                    alert('Уведомление отправлено, получатель отмечен прочитанным');
+                                    location.reload();
+                                } else {
+                                    alert(data.message);
+                                }
+                            }).catch(err => alert('Ошибка'));
+                        });
+                    });
+                }
+            } catch(e) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-danger">Ошибка данных</td></tr>';
+                console.error(e);
+            }
         });
     }
 

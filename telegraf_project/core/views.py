@@ -5,7 +5,8 @@ from django.utils import timezone
 from datetime import datetime, timedelta
 from django.http import HttpResponseRedirect, JsonResponse, HttpResponse
 from django.core.paginator import Paginator
-from django.db.models import Count, Q
+from django.db.models import Count
+from django.db.models import Q, Exists, OuterRef
 from django.db import transaction
 from openpyxl import Workbook
 from docx import Document
@@ -17,6 +18,8 @@ from django.contrib.auth import update_session_auth_hash
 from django.contrib.auth.forms import PasswordChangeForm
 import json
 from django.urls import reverse
+from django.conf import settings
+import hashlib
 
 from .models import (
     Telegram, User, Log, TelegramRecipient, Department, Position,
@@ -146,32 +149,82 @@ def edit_telegram(request, pk):
         return redirect('telegram_journal')
     
     if request.method == 'POST':
-        telegram.text = request.POST.get('text')
-        recipients_str = request.POST.get('recipients', '')
-        recipient_ids = [int(id) for id in recipients_str.split(',') if id] if recipients_str else []
-        approvers_str = request.POST.get('approvers', '')
-        approver_ids = [int(id) for id in approvers_str.split(',') if id] if approvers_str else []
-        
+        # Получаем данные из формы
+        text = request.POST.get('text')
+        requires_approval = request.POST.get('requires_approval') == 'on'
+        requires_signature = request.POST.get('requires_signature') == 'on'
+        is_draft = request.POST.get('is_draft') == 'on'   # чекбокс черновика
+
+        recipients_raw = request.POST.get('recipients', '')
+        recipients_ids = [int(x) for x in recipients_raw.split(',') if x.strip()]
+        approvers_raw = request.POST.get('approvers', '')
+        approvers_ids = [int(x) for x in approvers_raw.split(',') if x.strip()]
+        signer_id = request.POST.get('signer')
+        if signer_id:
+            signer_id = int(signer_id)
+
+        # Валидация
+        if not recipients_ids:
+            messages.error(request, 'Выберите хотя бы одного получателя.')
+            return redirect('edit_telegram', pk=pk)
+        if requires_approval and not approvers_ids:
+            messages.error(request, 'Выберите согласующих.')
+            return redirect('edit_telegram', pk=pk)
+        if requires_signature and not signer_id:
+            messages.error(request, 'Выберите подписанта.')
+            return redirect('edit_telegram', pk=pk)
+
+        # Обновляем телеграмму
+        telegram.text = text
+        telegram.requires_approval = requires_approval
+        telegram.requires_signature = requires_signature
+        telegram.author_department = request.user.department.name if request.user.department else ''
+
+        # Пересоздаём получателей
         telegram.recipients.all().delete()
-        for uid in recipient_ids:
+        for uid in recipients_ids:
             TelegramRecipient.objects.create(telegram=telegram, user_id=uid, status='PENDING')
-        
-        if telegram.requires_approval:
-            telegram.approvers.set(approver_ids)
-            for aid in approver_ids:
+
+        # Обновляем согласующих
+        if requires_approval:
+            telegram.approvers.set(approvers_ids)
+            for aid in approvers_ids:
                 TelegramRecipient.objects.get_or_create(telegram=telegram, user_id=aid, defaults={'status': 'PENDING'})
         else:
             telegram.approvers.clear()
-        
-        if telegram.status == Telegram.Status.SIGNED:
+
+        # Обновляем подписанта
+        if requires_signature and signer_id:
+            telegram.signer_id = signer_id
+            telegram.save()
+            TelegramRecipient.objects.get_or_create(telegram=telegram, user_id=signer_id, defaults={'status': 'PENDING'})
+        else:
+            telegram.signer = None
+
+        # Сбрасываем старые подписи, согласования, отказы
+        telegram.signatures.all().delete()
+        telegram.approvals_received = 0
+        telegram.rejection_reason = None
+        telegram.rejected_by = None
+        telegram.rejected_at = None
+
+        # Если не черновик – отправляем по маршруту
+        if not is_draft:
+            if requires_approval:
+                telegram.transition_to(Telegram.Status.ON_APPROVAL)
+            elif requires_signature:
+                telegram.transition_to(Telegram.Status.ON_SIGNATURE)
+            else:
+                telegram.transition_to(Telegram.Status.DELIVERY)
+        else:
+            # Сохраняем как черновик
             telegram.status = Telegram.Status.DRAFT
-        telegram.signature = None
-        telegram.signed_at = None
-        telegram.save()
-        
+            telegram.save()
+
         messages.success(request, 'Телеграмма обновлена.')
         return redirect('telegram_journal')
     
+    # GET – подготовка данных для шаблона
     recipients_data = []
     for recipient in telegram.recipients.select_related('user__department', 'user__position').all():
         user = recipient.user
@@ -191,10 +244,20 @@ def edit_telegram(request, pk):
             'displayName': f"{approver.position.name if approver.position else 'Без должности'} ({approver.full_name or approver.username})"
         })
     
+    signer_info = None
+    if telegram.signer:
+        signer_info = {
+            'id': telegram.signer.id,
+            'displayName': telegram.signer.full_name or telegram.signer.username,
+            'deptId': telegram.signer.department.id if telegram.signer.department else None,
+            'deptName': telegram.signer.department.name if telegram.signer.department else ''
+        }
+    
     return render(request, 'core/edit_telegram.html', {
         'telegram': telegram,
         'recipients_data_json': recipients_data,
         'approvers_data_json': approvers_data,
+        'signer_info_json': signer_info,
     })
 
 @login_required
@@ -278,8 +341,6 @@ def send_to_signature(request, pk):
 def sign_telegram(request, pk):
     telegram = get_object_or_404(Telegram, pk=pk)
     try:
-        from django.conf import settings
-        import hashlib
         data = f"{telegram.id}{telegram.text}{telegram.author.id}{telegram.created_at.isoformat()}{settings.SECRET_KEY}"
         signature = hashlib.sha256(data.encode()).hexdigest()
         telegram.sign(request.user, signature)
@@ -304,15 +365,44 @@ def send_telegram_to_delivery(request, pk):
 @login_required
 def reject_telegram(request, pk):
     telegram = get_object_or_404(Telegram, pk=pk)
-    if request.user == telegram.author or request.user in telegram.approvers.all() or request.user == telegram.signer:
+    if request.user != telegram.author and request.user not in telegram.approvers.all() and request.user != telegram.signer:
+        messages.error(request, 'У вас нет прав на отклонение.')
+        return redirect('telegram_journal')
+    
+    if request.method == 'POST':
+        reason = request.POST.get('reason', '').strip()
+        if not reason:
+            messages.error(request, 'Укажите причину отказа.')
+            return redirect('telegram_journal')
         try:
-            telegram.reject(request.user)
-            messages.success(request, 'Телеграмма отклонена и возвращена в черновик.')
+            telegram.reject(request.user, reason)
+            messages.success(request, 'Телеграмма отклонена.')
         except ValueError as e:
             messages.error(request, str(e))
     else:
-        messages.error(request, 'У вас нет прав на отклонение.')
+        # GET-запрос – просто показываем страницу (лучше использовать модальное окно)
+        messages.error(request, 'Используйте форму для отказа.')
     return redirect('telegram_journal')
+
+@login_required
+def reject_telegram_with_reason(request, pk):
+    if request.method != 'POST':
+        return JsonResponse({'success': False, 'message': 'Метод не разрешён'}, status=405)
+    
+    try:
+        data = json.loads(request.body)
+        reason = data.get('reason', '').strip()
+        if not reason:
+            return JsonResponse({'success': False, 'message': 'Укажите причину отказа'})
+        
+        telegram = get_object_or_404(Telegram, pk=pk)
+        if not (request.user == telegram.author or request.user in telegram.approvers.all() or request.user == telegram.signer):
+            return JsonResponse({'success': False, 'message': 'Нет прав на отклонение'})
+        
+        telegram.reject(request.user, reason)
+        return JsonResponse({'success': True, 'message': 'Телеграмма отклонена'})
+    except Exception as e:
+        return JsonResponse({'success': False, 'message': str(e)})
 
 @login_required
 def mark_as_read(request, recipient_id):
@@ -455,7 +545,7 @@ def mass_copy(request):
 # ---------- Журнал ----------
 @login_required
 def telegram_journal(request):
-    # Если нет параметров type и stage – редирект на вкладку "Создание"
+    # Редирект на вкладку "Создание", если параметры не указаны
     if not request.GET.get('type') and not request.GET.get('stage'):
         return redirect(f"{request.path}?type=outgoing&stage=create")
 
@@ -467,21 +557,20 @@ def telegram_journal(request):
     elif user.role == 'OPERATOR':
         try:
             zone = OperatorZone.objects.get(operator=user)
-            departments_in_zone = zone.departments.all()
+            depts = zone.departments.all()
             telegrams = Telegram.objects.filter(
-                Q(author__department__in=departments_in_zone) |
-                Q(recipients__user__department__in=departments_in_zone)
+                Q(author__department__in=depts) | Q(recipients__user__department__in=depts)
             ).distinct()
         except OperatorZone.DoesNotExist:
             telegrams = Telegram.objects.none()
     else:  # USER
         telegrams = Telegram.objects.filter(Q(author=user) | Q(recipients__user=user)).distinct()
 
-    # Исключаем чужие черновики для не-USER
+    # Исключаем чужие черновики для не-USER (исправлено без union)
     if user.role != 'USER':
-        telegrams = telegrams.exclude(status=Telegram.Status.DRAFT, author=user)
-        own_drafts = Telegram.objects.filter(author=user, status=Telegram.Status.DRAFT)
-        telegrams = telegrams | own_drafts
+        telegrams = telegrams.filter(
+            Q(author=user) | ~Q(status=Telegram.Status.DRAFT)
+        )
 
     # Фильтрация по вкладкам
     type_filter = request.GET.get('type')
@@ -491,14 +580,25 @@ def telegram_journal(request):
     if type_filter == 'incoming':
         telegrams = telegrams.filter(recipients__user=user).distinct()
         if incoming_status == 'new':
-            telegrams = telegrams.filter(
-                recipients__status='PENDING',
-                status__in=[Telegram.Status.DELIVERY, Telegram.Status.ON_APPROVAL, Telegram.Status.ON_SIGNATURE]
-            )
+            if user.role == 'USER':
+                is_approver = Exists(Telegram.approvers.through.objects.filter(telegram=OuterRef('pk'), user=user))
+                q = Q(status=Telegram.Status.DELIVERY)
+                q |= (Q(status=Telegram.Status.ON_APPROVAL) & is_approver)
+                q |= (Q(status=Telegram.Status.ON_SIGNATURE) & Q(signer=user))
+                telegrams = telegrams.filter(q)
+            else:
+                telegrams = telegrams.filter(status__in=[Telegram.Status.ON_APPROVAL, Telegram.Status.ON_SIGNATURE, Telegram.Status.DELIVERY])
         elif incoming_status == 'read':
-            telegrams = telegrams.filter(recipients__status='READ')
+            recipient_read_exists = TelegramRecipient.objects.filter(
+                telegram=OuterRef('pk'), user=user, status='READ'
+            )
+            telegrams = telegrams.filter(Exists(recipient_read_exists))
     elif type_filter == 'outgoing':
-        telegrams = telegrams.filter(author=user)
+    # Для оператора в доставке и доставлено – не фильтруем по автору
+        if user.role == 'OPERATOR' and outgoing_stage in ('delivery', 'delivered'):
+            telegrams = telegrams
+        else:
+            telegrams = telegrams.filter(author=user)
         if outgoing_stage == 'create':
             telegrams = telegrams.exclude(status__in=[Telegram.Status.DELIVERY, Telegram.Status.DELIVERED])
         elif outgoing_stage == 'approval':
@@ -530,7 +630,7 @@ def telegram_journal(request):
     paginator = Paginator(telegrams, 20)
     page_obj = paginator.get_page(request.GET.get('page'))
 
-    # Подготовка данных для отображения и модальных окон
+    # Подготовка данных для отображения
     for t in page_obj:
         t.author_department = t.author.department.code if t.author.department else '—'
         t.recipient_departments = list(set(
@@ -546,10 +646,38 @@ def telegram_journal(request):
         t.recipients_status_json = json.dumps(t.get_recipients_status_list(), ensure_ascii=False)
         t.approvers_status_json = json.dumps(t.get_approvers_status_list(), ensure_ascii=False)
         t.signer_info_json = json.dumps(t.get_signer_info(), ensure_ascii=False) if t.signer else 'null'
+        t.rejection_data_json = json.dumps({
+            'reason': t.rejection_reason,
+            'rejected_by': t.rejected_by.full_name or t.rejected_by.username if t.rejected_by else None,
+            'rejected_at': t.rejected_at.strftime('%d.%m.%Y %H:%M') if t.rejected_at else None,
+        }, ensure_ascii=False)
 
-    new_count = TelegramRecipient.objects.filter(user=user, status='PENDING').count()
+        if user.role == 'OPERATOR':
+            recipients_list = []
+            for r in t.recipients.select_related('user__department'):
+                recipients_list.append({
+                    'id': r.id,
+                    'full_name': r.user.full_name or r.user.username,
+                    'department': r.user.department.code if r.user.department else '—',
+                    'status': r.status,
+                    'read_at': r.read_at.strftime('%d.%m.%Y %H:%M') if r.read_at else None,
+                    'delivery_method': r.delivery_method,
+                    'is_notified': r.is_notified,
+                    'last_notified_at': r.last_notified_at.strftime('%d.%m.%Y %H:%M') if r.last_notified_at else None,
+                })
+            t.recipients_manage_json = json.dumps(recipients_list, ensure_ascii=False)
+
+    # Счётчик новых
+    if user.role == 'USER':
+        is_approver = Exists(Telegram.approvers.through.objects.filter(telegram=OuterRef('telegram__pk'), user=user))
+        q_new = Q(telegram__status=Telegram.Status.DELIVERY)
+        q_new |= (Q(telegram__status=Telegram.Status.ON_APPROVAL) & is_approver)
+        q_new |= (Q(telegram__status=Telegram.Status.ON_SIGNATURE) & Q(telegram__signer=user))
+        new_count = TelegramRecipient.objects.filter(user=user, status='PENDING').filter(q_new).distinct().count()
+    else:
+        new_count = TelegramRecipient.objects.filter(user=user, status='PENDING').count()
+
     departments = Department.objects.all()
-
     return render(request, 'core/journal.html', {
         'page_obj': page_obj,
         'form': form,
@@ -761,7 +889,6 @@ def operatorzone_delete(request, pk):
     zone.delete()
     return redirect('operatorzone_list')
 
-# ---------- Панель оператора ----------
 @login_required
 @user_passes_test(is_operator)
 def operator_dashboard(request):
@@ -771,75 +898,147 @@ def operator_dashboard(request):
     except OperatorZone.DoesNotExist:
         departments_in_zone = []
 
-    # Получатели: непрочитанные (PENDING) или уже уведомлённые (is_notified=True)
-    recipients = TelegramRecipient.objects.filter(
-        user__department__in=departments_in_zone
-    ).filter(
-        Q(status='PENDING') | Q(is_notified=True)
-    ).select_related('telegram', 'user__department', 'telegram__author').order_by('-telegram__created_at')
+    # Базовые фильтры (по зоне)
+    base_filter = Q(author__department__in=departments_in_zone) | Q(recipients__user__department__in=departments_in_zone)
+    if not departments_in_zone:
+        base_filter = Q(pk__in=[])  # нет подразделений → ничего не показываем
 
+    # 1. Телеграммы, ожидающие согласования (ON_APPROVAL)
+    pending_approvals_qs = Telegram.objects.filter(
+        base_filter,
+        status=Telegram.Status.ON_APPROVAL
+    ).distinct()
+    # фильтры дат, номера (можно добавить из формы)
     form = OperatorFilterForm(request.GET)
     if form.is_valid():
         data = form.cleaned_data
         if data.get('start_date'):
-            recipients = recipients.filter(telegram__created_at__date__gte=data['start_date'])
+            pending_approvals_qs = pending_approvals_qs.filter(created_at__date__gte=data['start_date'])
         if data.get('end_date'):
-            recipients = recipients.filter(telegram__created_at__date__lte=data['end_date'])
+            pending_approvals_qs = pending_approvals_qs.filter(created_at__date__lte=data['end_date'])
         if data.get('number'):
-            recipients = recipients.filter(telegram__number__icontains=data['number'])
+            pending_approvals_qs = pending_approvals_qs.filter(number__icontains=data['number'])
+        # если выбран department, но в форме он может быть ограничен зоной
         if data.get('department'):
-            recipients = recipients.filter(user__department=data['department'])
-        if data.get('status'):
-            recipients = recipients.filter(status=data['status'])
+            pending_approvals_qs = pending_approvals_qs.filter(
+                Q(author__department=data['department']) | Q(recipients__user__department=data['department'])
+            ).distinct()
 
+    pending_approvals = []
+    for tg in pending_approvals_qs.select_related('author').prefetch_related('approvers', 'signatures'):
+        approvers = tg.approvers.all()
+        signed_ids = set(tg.signatures.values_list('user_id', flat=True))
+        pending = [a for a in approvers if a.id not in signed_ids]
+        pending_approvals.append({
+            'telegram': tg,
+            'approvers_list': [a.full_name or a.username for a in approvers],
+            'pending_approvers': [a.full_name or a.username for a in pending],
+            'waiting_display': _calc_waiting(tg.created_at),
+        })
+
+    # 2. Телеграммы, ожидающие подписи (ON_SIGNATURE)
+    pending_signatures_qs = Telegram.objects.filter(
+        base_filter,
+        status=Telegram.Status.ON_SIGNATURE,
+        signer__isnull=False
+    ).distinct()
+    if form.is_valid():
+        data = form.cleaned_data
+        if data.get('start_date'):
+            pending_signatures_qs = pending_signatures_qs.filter(created_at__date__gte=data['start_date'])
+        if data.get('end_date'):
+            pending_signatures_qs = pending_signatures_qs.filter(created_at__date__lte=data['end_date'])
+        if data.get('number'):
+            pending_signatures_qs = pending_signatures_qs.filter(number__icontains=data['number'])
+        if data.get('department'):
+            pending_signatures_qs = pending_signatures_qs.filter(
+                Q(author__department=data['department']) | Q(recipients__user__department=data['department'])
+            ).distinct()
+    pending_signatures = []
+    for tg in pending_signatures_qs.select_related('author', 'signer'):
+        pending_signatures.append({
+            'telegram': tg,
+            'signer_name': tg.signer.full_name or tg.signer.username,
+            'waiting_display': _calc_waiting(tg.created_at),
+        })
+
+    # 3. Доставка, непрочитанные получатели
+    pending_reads_qs = TelegramRecipient.objects.filter(
+        telegram__status=Telegram.Status.DELIVERY,
+        status='PENDING',
+        user__department__in=departments_in_zone
+    ).select_related('telegram__author', 'user').order_by('-telegram__created_at')
+    if form.is_valid():
+        data = form.cleaned_data
+        if data.get('start_date'):
+            pending_reads_qs = pending_reads_qs.filter(telegram__created_at__date__gte=data['start_date'])
+        if data.get('end_date'):
+            pending_reads_qs = pending_reads_qs.filter(telegram__created_at__date__lte=data['end_date'])
+        if data.get('number'):
+            pending_reads_qs = pending_reads_qs.filter(telegram__number__icontains=data['number'])
+        if data.get('department'):
+            pending_reads_qs = pending_reads_qs.filter(user__department=data['department'])
+    pending_reads = []
+    for recip in pending_reads_qs:
+        recip.waiting_display = _calc_waiting(recip.telegram.created_at)
+        pending_reads.append(recip)
+
+    # Фильтры для формы (отображать только подразделения из зоны)
     form.fields['department'].queryset = departments_in_zone
 
-    # Время ожидания (только для непрочитанных)
-    for item in recipients:
-        if item.status == 'PENDING':
-            delta = timezone.now() - item.telegram.created_at
-            seconds = delta.total_seconds()
-            if seconds > 300:
-                minutes = int(seconds // 60)
-                hours = minutes // 60
-                days = hours // 24
-                minutes = minutes % 60
-                hours = hours % 24
-                parts = []
-                if days > 0:
-                    parts.append(f"{days} дн.")
-                if hours > 0:
-                    parts.append(f"{hours} ч.")
-                if minutes > 0:
-                    parts.append(f"{minutes} мин.")
-                item.waiting_display = ' '.join(parts) if parts else "менее 5 минут"
-            else:
-                item.waiting_display = "менее 5 минут"
-        else:
-            item.waiting_display = "—"
-
+    # Обработка POST (уведомления)
     if request.method == 'POST':
-        recipient_id = request.POST.get('recipient_id')
-        if recipient_id:
-            recipient = get_object_or_404(TelegramRecipient, id=recipient_id)
-            if recipient.user.department not in departments_in_zone:
-                messages.error(request, 'Нет прав на это действие.')
-                return redirect('operator_dashboard')
-            recipient.is_notified = True
-            recipient.last_notified_at = timezone.now()
-            recipient.save()
-            Log.objects.create(
-                user=request.user,
-                action=Log.ActionType.NOTIFY,
-                details=f"Уведомлён получатель {recipient.user.username} (ID={recipient.user.id}) о телеграмме ID={recipient.telegram.id}"
-            )
-            messages.info(request, 'Уведомление отправлено (логирование).')
+        action = request.POST.get('action')
+        if action == 'notify_recipient':
+            recipient_id = request.POST.get('recipient_id')
+            if recipient_id:
+                recipient = get_object_or_404(TelegramRecipient, id=recipient_id)
+                if recipient.user.department not in departments_in_zone:
+                    messages.error(request, 'Нет прав на это действие.')
+                    return redirect('operator_dashboard')
+                recipient.is_notified = True
+                recipient.last_notified_at = timezone.now()
+                recipient.save()
+                Log.objects.create(
+                    user=request.user,
+                    action=Log.ActionType.NOTIFY,
+                    details=f"Уведомлён получатель {recipient.user.username} (ID={recipient.user.id}) о телеграмме ID={recipient.telegram.id}"
+                )
+                messages.info(request, 'Уведомление отправлено.')
+        elif action == 'notify_approvers' or action == 'notify_signer':
+            telegram_id = request.POST.get('telegram_id')
+            if telegram_id:
+                tg = get_object_or_404(Telegram, id=telegram_id)
+                # Можно отправить уведомление всем согласующим или подписанту
+                # Здесь просто логируем, но можно расширить
+                messages.info(request, f'Уведомление для телеграммы №{tg.number} зарегистрировано.')
         return redirect('operator_dashboard')
 
     return render(request, 'core/operator_dashboard.html', {
-        'recipients': recipients,
         'form': form,
+        'pending_approvals': pending_approvals,
+        'pending_signatures': pending_signatures,
+        'pending_reads': pending_reads,
     })
+
+def _calc_waiting(created_at):
+    delta = timezone.now() - created_at
+    seconds = delta.total_seconds()
+    if seconds < 300:
+        return "менее 5 минут"
+    minutes = int(seconds // 60)
+    hours = minutes // 60
+    days = hours // 24
+    minutes = minutes % 60
+    hours = hours % 24
+    parts = []
+    if days > 0:
+        parts.append(f"{days} дн.")
+    if hours > 0:
+        parts.append(f"{hours} ч.")
+    if minutes > 0:
+        parts.append(f"{minutes} мин.")
+    return ' '.join(parts) if parts else "менее 5 минут"
 
 # ---------- Отчёты ----------
 @login_required
@@ -1077,3 +1276,37 @@ class CustomLoginView(LoginView):
         context = super().get_context_data(**kwargs)
         context['admins'] = User.objects.filter(role='ADMIN', is_active=True)
         return context
+    
+@login_required
+@user_passes_test(is_operator)
+@require_http_methods(['POST'])
+def notify_and_mark_read(request):
+    data = json.loads(request.body)
+    recipient_id = data.get('recipient_id')
+    method = data.get('method')
+    if not recipient_id or method not in dict(TelegramRecipient.DELIVERY_METHOD_CHOICES):
+        return JsonResponse({'success': False, 'message': 'Неверные данные'})
+    recipient = get_object_or_404(TelegramRecipient, id=recipient_id)
+    # Проверка прав
+    try:
+        zone = OperatorZone.objects.get(operator=request.user)
+        if recipient.user.department not in zone.departments.all():
+            return JsonResponse({'success': False, 'message': 'Нет прав'})
+    except OperatorZone.DoesNotExist:
+        return JsonResponse({'success': False, 'message': 'Нет прав'})
+    
+    recipient.delivery_method = method
+    recipient.is_notified = True
+    recipient.last_notified_at = timezone.now()
+    if recipient.status != 'READ':
+        recipient.status = 'READ'
+        recipient.read_at = timezone.now()
+    recipient.save()
+    
+    tg = recipient.telegram
+    if tg.recipients.filter(status='PENDING').count() == 0:
+        try:
+            tg.transition_to(Telegram.Status.DELIVERED)
+        except ValueError:
+            pass
+    return JsonResponse({'success': True, 'message': 'Уведомление отправлено, получатель отмечен прочитанным'})

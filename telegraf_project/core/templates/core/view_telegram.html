@@ -6,7 +6,12 @@
     <div class="card shadow-sm">
         <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center">
             <h4 class="mb-0">Телеграмма № {{ telegram.number|default:telegram.id }}</h4>
-            <span class="badge status-badge status-{{ telegram.status|lower }}">{{ telegram.get_status_display }}</span>
+            <div>
+                <span class="badge status-badge status-{{ telegram.status|lower }}">{{ telegram.get_status_display }}</span>
+                {% if telegram.status == 'REJECTED' and telegram.rejection_reason %}
+                    <i class="bi bi-info-circle text-danger ms-2" data-bs-toggle="modal" data-bs-target="#rejectInfoModal" data-reason="{{ telegram.rejection_reason }}" style="cursor: pointer;"></i>
+                {% endif %}
+            </div>
         </div>
         <div class="card-body">
             <div class="row mb-3">
@@ -72,12 +77,12 @@
                 {# --- Согласование --- #}
                 {% elif telegram.status == 'ON_APPROVAL' and user in telegram.approvers.all %}
                     <a href="{% url 'approve_telegram' telegram.id %}" class="btn btn-success">✓ Согласовать</a>
-                    <a href="{% url 'reject_telegram' telegram.id %}" class="btn btn-danger">✗ Отказать</a>
+                    <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#rejectModal" data-id="{{ telegram.id }}">✗ Отказать</button>
 
                 {# --- Подпись --- #}
                 {% elif telegram.status == 'ON_SIGNATURE' and user == telegram.signer %}
                     <a href="{% url 'sign_telegram' telegram.id %}" class="btn btn-success">✍ Подписать</a>
-                    <a href="{% url 'reject_telegram' telegram.id %}" class="btn btn-danger">✗ Отказать</a>
+                    <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#rejectModal" data-id="{{ telegram.id }}">✗ Отказать</button>
 
                 {# --- Для автора (черновик, после согласования, после подписи) --- #}
                 {% elif telegram.status == 'DRAFT' and request.user == telegram.author %}
@@ -109,6 +114,40 @@
     </div>
 </div>
 
+<!-- Модальное окно для отказа -->
+<div class="modal fade" id="rejectModal" tabindex="-1" aria-labelledby="rejectModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="rejectModalLabel">Причина отказа</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <textarea id="rejectReason" class="form-control" rows="3" placeholder="Укажите причину отказа..."></textarea>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                <button type="button" class="btn btn-danger" id="confirmRejectBtn">Отказать</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Модальное окно для просмотра причины отказа (если уже отклонена) -->
+<div class="modal fade" id="rejectInfoModal" tabindex="-1" aria-labelledby="rejectInfoModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Причина отказа</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p id="rejectInfoText"></p>
+            </div>
+        </div>
+    </div>
+</div>
+
 <style>
     .status-badge {
         padding: 0.4rem 0.8rem;
@@ -124,4 +163,71 @@
     .status-delivered { background: #6f42c1; color: white; }
     .status-rejected { background: #dc3545; color: white; }
 </style>
+
+<script>
+    function getCookie(name) {
+        let cookieValue = null;
+        if (document.cookie && document.cookie !== '') {
+            const cookies = document.cookie.split(';');
+            for (let i = 0; i < cookies.length; i++) {
+                const cookie = cookies[i].trim();
+                if (cookie.substring(0, name.length + 1) === (name + '=')) {
+                    cookieValue = decodeURIComponent(cookie.substring(name.length + 1));
+                    break;
+                }
+            }
+        }
+        return cookieValue;
+    }
+
+    // Переменная для хранения ID телеграммы при отказе
+    let currentRejectId = null;
+
+    // При открытии модального окна сохраняем ID телеграммы
+    const rejectModal = document.getElementById('rejectModal');
+    if (rejectModal) {
+        rejectModal.addEventListener('show.bs.modal', function (event) {
+            const button = event.relatedTarget;
+            currentRejectId = button.getAttribute('data-id');
+        });
+    }
+
+    // Обработчик подтверждения отказа
+    const confirmRejectBtn = document.getElementById('confirmRejectBtn');
+    if (confirmRejectBtn) {
+        confirmRejectBtn.addEventListener('click', function() {
+            const reason = document.getElementById('rejectReason').value.trim();
+            if (!reason) {
+                alert('Укажите причину отказа');
+                return;
+            }
+            fetch(`/telegram/${currentRejectId}/reject-with-reason/`, {
+                method: 'POST',
+                headers: {
+                    'X-CSRFToken': getCookie('csrftoken'),
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ reason: reason })
+            }).then(response => response.json()).then(data => {
+                if (data.success) {
+                    location.reload();
+                } else {
+                    alert(data.message);
+                }
+            }).catch(error => {
+                alert('Ошибка при отправке');
+            });
+        });
+    }
+
+    // Модальное окно для просмотра причины отказа
+    const rejectInfoModal = document.getElementById('rejectInfoModal');
+    if (rejectInfoModal) {
+        rejectInfoModal.addEventListener('show.bs.modal', function (event) {
+            const button = event.relatedTarget;
+            const reason = button.getAttribute('data-reason');
+            document.getElementById('rejectInfoText').innerText = reason;
+        });
+    }
+</script>
 {% endblock %}

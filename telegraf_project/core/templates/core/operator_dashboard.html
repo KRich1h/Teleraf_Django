@@ -1,6 +1,6 @@
 ﻿{% extends 'base.html' %}
 {% block content %}
-<h2 class="h4 mb-3"><i class="bi bi-person-badge"></i> Модуль оператора — обслуживаемые подразделения</h2>
+<h2 class="h4 mb-3"><i class="bi bi-person-badge"></i> Модуль оператора — контроль процессов</h2>
 
 <div class="card mb-3">
     <div class="card-body">
@@ -18,11 +18,119 @@
     </div>
 </div>
 
-<div class="card">
+<!-- Раздел 1: Ожидают согласования -->
+<div class="card mb-4">
+    <div class="card-header bg-white">
+        <h5 class="mb-0">📝 Ожидают согласования (ON_APPROVAL)</h5>
+    </div>
     <div class="card-body">
-        {% if recipients %}
+        {% if pending_approvals %}
         <div class="table-responsive">
-            <table class="table table-hover">
+            <table class="table table-hover table-sm">
+                <thead>
+                    <tr>
+                        <th>№</th>
+                        <th>Дата создания</th>
+                        <th>Отправитель</th>
+                        <th>Текст (фрагмент)</th>
+                        <th>Согласующие</th>
+                        <th>Не согласовали</th>
+                        <th>Время ожидания</th>
+                        <th>Действие</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in pending_approvals %}
+                    <tr>
+                        <td>{{ item.telegram.number|default:"—" }}</td>
+                        <td>{{ item.telegram.created_at|date:"d.m.Y H:i" }}</td>
+                        <td>{{ item.telegram.author.full_name|default:item.telegram.author.username }}</td>
+                        <td>{{ item.telegram.text|truncatechars:50 }}</td>
+                        <td>{{ item.approvers_list|join:", " }}</td>
+                        <td>
+                            {% if item.pending_approvers %}
+                                <span class="text-danger">{{ item.pending_approvers|join:", " }}</span>
+                            {% else %}
+                                <span class="text-success">Все согласовали</span>
+                            {% endif %}
+                         </td>
+                        <td>{{ item.waiting_display }}</td>
+                        <td>
+                            <form method="post" class="d-inline">
+                                {% csrf_token %}
+                                <input type="hidden" name="telegram_id" value="{{ item.telegram.id }}">
+                                <input type="hidden" name="action" value="notify_approvers">
+                                <button type="submit" class="btn btn-sm btn-warning">Уведомить</button>
+                            </form>
+                         </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-muted text-center">Нет телеграмм, ожидающих согласования</div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Раздел 2: Ожидают подписи -->
+<div class="card mb-4">
+    <div class="card-header bg-white">
+        <h5 class="mb-0">✍️ Ожидают подписи (ON_SIGNATURE)</h5>
+    </div>
+    <div class="card-body">
+        {% if pending_signatures %}
+        <div class="table-responsive">
+            <table class="table table-hover table-sm">
+                <thead>
+                    <tr>
+                        <th>№</th>
+                        <th>Дата создания</th>
+                        <th>Отправитель</th>
+                        <th>Текст (фрагмент)</th>
+                        <th>Подписант</th>
+                        <th>Время ожидания</th>
+                        <th>Действие</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in pending_signatures %}
+                    <tr>
+                        <td>{{ item.telegram.number|default:"—" }}</td>
+                        <td>{{ item.telegram.created_at|date:"d.m.Y H:i" }}</td>
+                        <td>{{ item.telegram.author.full_name|default:item.telegram.author.username }}</td>
+                        <td>{{ item.telegram.text|truncatechars:50 }}</td>
+                        <td>{{ item.signer_name }}</td>
+                        <td>{{ item.waiting_display }}</td>
+                        <td>
+                            <form method="post" class="d-inline">
+                                {% csrf_token %}
+                                <input type="hidden" name="telegram_id" value="{{ item.telegram.id }}">
+                                <input type="hidden" name="action" value="notify_signer">
+                                <button type="submit" class="btn btn-sm btn-warning">Уведомить</button>
+                            </form>
+                         </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="text-muted text-center">Нет телеграмм, ожидающих подписи</div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Раздел 3: Доставка (непрочитанные) -->
+<div class="card mb-4">
+    <div class="card-header bg-white">
+        <h5 class="mb-0">📬 Доставка (непрочитанные получатели)</h5>
+    </div>
+    <div class="card-body">
+        {% if pending_reads %}
+        <div class="table-responsive">
+            <table class="table table-hover table-sm">
                 <thead>
                     <tr>
                         <th>№</th>
@@ -35,7 +143,7 @@
                     </tr>
                 </thead>
                 <tbody>
-                    {% for item in recipients %}
+                    {% for item in pending_reads %}
                     <tr>
                         <td>{{ item.telegram.number|default:"—" }}</td>
                         <td>{{ item.telegram.created_at|date:"d.m.Y H:i" }}</td>
@@ -43,38 +151,40 @@
                         <td>{{ item.user.full_name|default:item.user.username }}</td>
                         <td>
                             {% if item.status == 'READ' %}
-                                <span class="badge bg-success text-dark fw-bold">Прочитана</span>
+                                <span class="badge bg-success">Прочитана</span>
                             {% else %}
-                                <span class="badge bg-secondary text-dark fw-bold">Не прочитана</span>
+                                <span class="badge bg-secondary">Не прочитана</span>
                             {% endif %}
-                        </td>
+                         </td>
                         <td>{{ item.waiting_display }}</td>
                         <td>
                             {% if item.is_notified %}
-                                <a href="#" class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#notifyModal" data-date="{{ item.last_notified_at|date:'d.m.Y H:i:s' }}" data-recipient="{{ item.user.full_name|default:item.user.username }}">Уведомлено</a>
+                                <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="modal" data-bs-target="#notifyModal" data-recipient="{{ item.user.full_name|default:item.user.username }}" data-date="{{ item.last_notified_at|date:'d.m.Y H:i:s' }}">Уведомлено</button>
                             {% else %}
                                 <form method="post" class="d-inline">
                                     {% csrf_token %}
                                     <input type="hidden" name="recipient_id" value="{{ item.id }}">
-                                    <input type="hidden" name="action" value="notify">
+                                    <input type="hidden" name="action" value="notify_recipient">
                                     <button type="submit" class="btn btn-sm btn-warning">Уведомить</button>
                                 </form>
                             {% endif %}
-                        </td>
+                         </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
         {% else %}
-        <div class="text-muted text-center p-3">Нет телеграмм в обслуживаемых подразделениях.</div>
+        <div class="text-muted text-center">Все доставленные телеграммы прочитаны</div>
         {% endif %}
     </div>
 </div>
+
 <div class="mt-3">
     <a href="{% url 'home' %}" class="btn btn-sm btn-secondary">На главную</a>
 </div>
 
+<!-- Модальное окно для уведомлений (без изменений) -->
 <div class="modal fade" id="notifyModal" tabindex="-1">
     <div class="modal-dialog">
         <div class="modal-content">
@@ -95,10 +205,12 @@
 
 <script>
     const notifyModal = document.getElementById('notifyModal');
-    notifyModal.addEventListener('show.bs.modal', function(event) {
-        const button = event.relatedTarget;
-        document.getElementById('notifyRecipient').innerText = button.getAttribute('data-recipient');
-        document.getElementById('notifyDate').innerText = button.getAttribute('data-date');
-    });
+    if (notifyModal) {
+        notifyModal.addEventListener('show.bs.modal', function(event) {
+            const button = event.relatedTarget;
+            document.getElementById('notifyRecipient').innerText = button.getAttribute('data-recipient') || '—';
+            document.getElementById('notifyDate').innerText = button.getAttribute('data-date') || '—';
+        });
+    }
 </script>
 {% endblock %}

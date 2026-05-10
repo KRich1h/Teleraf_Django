@@ -56,4 +56,6 @@ urlpatterns = [
     path('telegram/<int:pk>/sign/', views.sign_telegram, name='sign_telegram'),
     path('telegram/<int:pk>/send-to-delivery/', views.send_telegram_to_delivery, name='send_telegram_to_delivery'),
     path('telegram/<int:pk>/reject/', views.reject_telegram, name='reject_telegram'),
+    path('telegram/<int:pk>/reject-with-reason/', views.reject_telegram_with_reason, name='reject_telegram_with_reason'),
+    path('operator/notify-and-mark-read/', views.notify_and_mark_read, name='notify_and_mark_read'),
 ]

@@ -45,7 +45,7 @@ class TelegramRecipient(models.Model):
     DELIVERY_METHOD_CHOICES = [
         ('PHONE', 'По телефону'),
         ('FAX', 'По факсу'),
-        ('COURIER', 'Экспедиция'),
+        ('EMAIL', 'По электронной почте'),
     ]
 
     telegram = models.ForeignKey('Telegram', on_delete=models.CASCADE, related_name='recipients')
@@ -103,6 +103,9 @@ class Telegram(models.Model):
     delivered_at = models.DateTimeField(null=True, blank=True, verbose_name='Дата доставки всем')
     executor = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='executed_telegrams', verbose_name='Исполнитель')
     author_department = models.CharField(max_length=255, blank=True, verbose_name='Подразделение автора')
+    rejection_reason = models.TextField(blank=True, null=True, verbose_name='Причина отказа')
+    rejected_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='rejected_telegrams', verbose_name='Кто отклонил')
+    rejected_at = models.DateTimeField(null=True, blank=True, verbose_name='Дата отклонения')
 
     def save(self, *args, **kwargs):
         if not self.number and self.pk:
@@ -115,8 +118,8 @@ class Telegram(models.Model):
     def can_transition_to(self, target_status):
         allowed = {
             self.Status.DRAFT: [self.Status.ON_APPROVAL, self.Status.ON_SIGNATURE, self.Status.DELIVERY, self.Status.REJECTED],
-            self.Status.ON_APPROVAL: [self.Status.APPROVED, self.Status.REJECTED],
-            self.Status.APPROVED: [self.Status.ON_SIGNATURE, self.Status.REJECTED],
+            self.Status.ON_APPROVAL: [self.Status.APPROVED, self.Status.ON_SIGNATURE, self.Status.REJECTED],
+            self.Status.APPROVED: [self.Status.ON_SIGNATURE, self.Status.DELIVERY, self.Status.REJECTED],  # добавлен DELIVERY
             self.Status.ON_SIGNATURE: [self.Status.SIGNED, self.Status.REJECTED],
             self.Status.SIGNED: [self.Status.DELIVERY],
             self.Status.DELIVERY: [self.Status.DELIVERED],
@@ -137,6 +140,13 @@ class Telegram(models.Model):
             self.signed_at = timezone.now()
             if self.signer:
                 self.signer_department = self.signer.department.name if self.signer.department else ''
+        if target_status == self.Status.ON_SIGNATURE:
+            # Принудительно ставим подписанту статус получателя PENDING
+            if self.signer:
+                recipient, created = self.recipients.get_or_create(user=self.signer)
+                recipient.status = 'PENDING'
+                recipient.read_at = None
+                recipient.save()
         if target_status == self.Status.DELIVERED and not self.delivered_at:
             self.delivered_at = timezone.now()
         self.save()
@@ -146,12 +156,22 @@ class Telegram(models.Model):
             raise PermissionError("Согласование не требуется")
         if user not in self.approvers.all():
             raise PermissionError("Вы не в списке согласующих")
-        # Добавляем запись о согласовании
-        TelegramSignature.objects.get_or_create(telegram=self, user=user)
+        if TelegramSignature.objects.filter(telegram=self, user=user).exists():
+            raise PermissionError("Вы уже согласовали эту телеграмму")
+        TelegramSignature.objects.create(telegram=self, user=user)
         self.approvals_received += 1
         self.save()
+        # Отмечаем получателя (согласующего) как прочитавшего
+        recipient = self.recipients.filter(user=user).first()
+        if recipient and recipient.status == 'PENDING':
+            recipient.status = 'READ'
+            recipient.read_at = timezone.now()
+            recipient.save()
         if self.approvals_received >= self.approvers.count():
-            self.transition_to(self.Status.APPROVED)
+            if self.requires_signature:
+                self.transition_to(self.Status.ON_SIGNATURE)
+            else:
+                self.transition_to(self.Status.APPROVED)
 
     def sign(self, user, signature_value=None):
         if not self.requires_signature:
@@ -162,6 +182,12 @@ class Telegram(models.Model):
         if signature_value:
             self.signature = signature_value
             self.save()
+    
+        recipient = self.recipients.filter(user=user).first()
+        if recipient and recipient.status == 'PENDING':
+            recipient.status = 'READ'
+            recipient.read_at = timezone.now()
+            recipient.save()
 
     def send_to_delivery(self):
         self.transition_to(self.Status.DELIVERY)
@@ -177,9 +203,19 @@ class Telegram(models.Model):
         if self.all_recipients_read():
             self.transition_to(self.Status.DELIVERED)
 
-    def reject(self, user):
+    def reject(self, user, reason=None):
         if self.status in [self.Status.ON_APPROVAL, self.Status.ON_SIGNATURE]:
+            self.rejection_reason = reason
+            self.rejected_by = user
+            self.rejected_at = timezone.now()
             self.transition_to(self.Status.REJECTED)
+            # Устанавливаем статус READ для отказавшего пользователя, чтобы он увидел отказ в "Ознакомлен"
+            recipient = self.recipients.filter(user=user).first()
+            if recipient and recipient.status != 'READ':  # чтобы не затирать дату, если уже READ
+                recipient.status = 'READ'
+                recipient.read_at = timezone.now()
+                recipient.save()
+            # Если нужно, можно также для всех approvers установить READ, но они уже имеют READ после согласования.
 
     def get_approval_progress(self):
         total = self.approvers.count()
