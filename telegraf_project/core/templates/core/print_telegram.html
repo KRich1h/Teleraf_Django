@@ -1,42 +1,176 @@
-﻿{% extends 'base.html' %}
-{% block content %}
-<div class="container mt-4">
-    <div class="card">
-        <div class="card-header bg-white">
-            <h3 class="text-center">Телеграмма №{{ telegram.number|default:"—" }}</h3>
+﻿{% load static %}
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Телеграмма №{{ telegram.number|default:telegram.id }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <style>
+        body {
+            background: white;
+            padding: 20px;
+            font-family: 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+        }
+        .telegram-card {
+            max-width: 1000px;
+            margin: 0 auto;
+            border: 1px solid #dee2e6;
+            border-radius: 16px;
+            background: white;
+            box-shadow: 0 0.5rem 1rem rgba(0,0,0,0.05);
+        }
+        .status-badge {
+            padding: 0.3rem 0.8rem;
+            border-radius: 30px;
+            font-size: 0.8rem;
+        }
+        .status-draft { background: #6c757d; color: white; }
+        .status-on_approval { background: #fd7e14; color: white; }
+        .status-approved { background: #20c997; color: white; }
+        .status-on_signature { background: #0d6efd; color: white; }
+        .status-signed { background: #198754; color: white; }
+        .status-delivery { background: #0dcaf0; color: black; }
+        .status-delivered { background: #6f42c1; color: white; }
+        .status-rejected { background: #dc3545; color: white; }
+
+        /* Стили для печати – скрываем кнопки и лишние элементы */
+        @media print {
+            .no-print, .btn, .action-buttons, .print-hide {
+                display: none !important;
+            }
+            body {
+                padding: 0;
+                margin: 0;
+            }
+            .telegram-card {
+                box-shadow: none;
+                border: none;
+            }
+            .card-header, .card-footer {
+                background: white !important;
+                border: none;
+            }
+            .status-badge {
+                border: 1px solid #aaa;
+                background: #f8f9fa !important;
+                color: black !important;
+            }
+        }
+    </style>
+</head>
+<body>
+
+<div class="telegram-card">
+    <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center border-bottom">
+        <h4 class="mb-0">Телеграмма № {{ telegram.number|default:telegram.id }}</h4>
+        <div>
+            <span class="badge status-badge status-{{ telegram.status|lower }}">{{ telegram.get_status_display }}</span>
+            {% if telegram.status == 'REJECTED' and telegram.rejection_reason %}
+                <i class="bi bi-info-circle text-danger ms-2" data-bs-toggle="tooltip" title="{{ telegram.rejection_reason }}"></i>
+            {% endif %}
         </div>
-        <div class="card-body">
-            <p><strong>Дата создания:</strong> {{ telegram.created_at|date:"d.m.Y H:i" }}</p>
-            <p><strong>Автор:</strong> {{ telegram.author.full_name|default:telegram.author.username }} ({{ telegram.author.department.name|default:"—" }})</p>
-            <p><strong>Категория:</strong> {% if telegram.priority == 'URGENT' %}Срочная{% else %}Обычная{% endif %}</p>
-            <p><strong>Текст:</strong></p>
-            <div class="border p-3 bg-light" style="white-space: pre-wrap;">{{ telegram.text }}</div>
-            <hr>
-            <p><strong>Получатели:</strong></p>
-            <ul>
-                {% for recipient in telegram.recipients.all %}
-                    <li>{{ recipient.user.full_name|default:recipient.user.username }} ({{ recipient.user.department.name|default:"—" }})</li>
-                {% endfor %}
-            </ul>
-            {% if telegram.requires_approval %}
-                <p><strong>Подписанты:</strong></p>
-                <ul>
+    </div>
+
+    <div class="card-body">
+        <div class="row mb-3">
+            <div class="col-md-2 fw-bold">Отправитель:</div>
+            <div class="col-md-10">{{ telegram.author_department|default:"—" }} — {{ telegram.author.full_name|default:telegram.author.username }}</div>
+        </div>
+        <div class="row mb-3">
+            <div class="col-md-2 fw-bold">Дата создания:</div>
+            <div class="col-md-10">{{ telegram.created_at|date:"d.m.Y H:i" }}</div>
+        </div>
+        <div class="row mb-3">
+            <div class="col-md-2 fw-bold">Текст:</div>
+            <div class="col-md-10">{{ telegram.text|linebreaksbr }}</div>
+        </div>
+
+        {% if telegram.requires_approval %}
+        <div class="row mb-3">
+            <div class="col-md-2 fw-bold">Согласование:</div>
+            <div class="col-md-9">
+                Прогресс: {{ telegram.approvals_received }}/{{ telegram.approvers.count }}
+                {% if telegram.status == 'ON_APPROVAL' and user in telegram.approvers.all %}
+                    <span class="text-warning">(ожидает вашего согласования)</span>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if telegram.requires_signature %}
+        <div class="row mb-3">
+            <div class="col-md-2 fw-bold">Подпись:</div>
+            <div class="col-md-9">
+                {% if telegram.signed_at %}
+                    <span class="text-success">Подписана {{ telegram.signed_at|date:"d.m.Y H:i" }}</span>
+                    <br><small>Подписант: {{ telegram.signer.full_name|default:telegram.signer.username }}</small>
+                {% elif telegram.signer %}
+                    <span class="text-warning">Ожидает подписи от {{ telegram.signer.full_name|default:telegram.signer.username }}</span>
+                {% else %}
+                    Не подписана
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if telegram.status == 'DELIVERY' or telegram.status == 'DELIVERED' %}
+        <div class="row mb-3">
+            <div class="col-md-2 fw-bold">Доставка:</div>
+            <div class="col-md-9">
+                {% with progress=telegram.get_read_progress %}
+                    Прочитано: {{ progress.0 }} из {{ progress.1 }}
+                {% endwith %}
+            </div>
+        </div>
+        {% endif %}
+
+        <hr>
+        <div class="row mb-2">
+            <div class="col-md-2 fw-bold">Получатели:</div>
+            <div class="col-md-10">
+                <ul class="mb-0">
+                    {% for recipient in telegram.recipients.all %}
+                        <li>{{ recipient.user.full_name|default:recipient.user.username }} ({{ recipient.user.department.name|default:"—" }})</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+
+        {% if telegram.requires_approval and telegram.approvers.exists %}
+        <div class="row mb-2">
+            <div class="col-md-2 fw-bold">Согласующие:</div>
+            <div class="col-md-10">
+                <ul class="mb-0">
                     {% for approver in telegram.approvers.all %}
                         <li>{{ approver.full_name|default:approver.username }} ({{ approver.department.name|default:"—" }})</li>
                     {% endfor %}
                 </ul>
-                <div class="mt-4 pt-3 border-top text-center">
-                    <p>Место для подписи</p>
-                    <p>______________________</p>
-                </div>
-            {% else %}
-                <p><strong>Подпись не требуется.</strong></p>
-            {% endif %}
+            </div>
         </div>
-        <div class="card-footer text-end">
-            <a href="{% url 'telegram_journal' %}" class="btn btn-secondary">Назад</a>
-            <button onclick="window.print()" class="btn btn-primary">Печать</button>
+        {% endif %}
+
+        {% if telegram.requires_signature and telegram.signer %}
+        <div class="row mb-2">
+            <div class="col-md-2 fw-bold">Подписант:</div>
+            <div class="col-md-10">{{ telegram.signer.full_name|default:telegram.signer.username }} ({{ telegram.signer.department.name|default:"—" }})</div>
         </div>
+        {% endif %}
+    </div>
+
+    <div class="card-footer bg-white text-end border-top no-print">
+        <button onclick="window.close()" class="btn btn-secondary me-2">Закрыть</button>
+        <button onclick="window.print()" class="btn btn-primary">🖨 Печать</button>
     </div>
 </div>
-{% endblock %}
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // Автоматическая подсказка для причины отказа (если есть)
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
+    });
+</script>
+</body>
+</html>

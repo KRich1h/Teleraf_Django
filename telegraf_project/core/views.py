@@ -20,6 +20,7 @@ import json
 from django.urls import reverse
 from django.conf import settings
 import hashlib
+from django.utils.timezone import make_aware
 
 from .models import (
     Telegram, User, Log, TelegramRecipient, Department, Position,
@@ -298,7 +299,31 @@ def delete_telegram(request, pk):
 @login_required
 def print_telegram(request, pk):
     telegram = get_object_or_404(Telegram, pk=pk)
-    return render(request, 'core/print_telegram.html', {'telegram': telegram})
+    user = request.user
+    
+    # Проверка доступа: автор, получатель, согласующий, подписант или админ
+    has_access = (
+        user == telegram.author or
+        user.role == 'ADMIN' or
+        telegram.recipients.filter(user=user).exists() or
+        telegram.approvers.filter(id=user.id).exists() or
+        telegram.signer == user
+    )
+    if not has_access:
+        messages.error(request, 'У вас нет доступа к этой телеграмме.')
+        return redirect('telegram_journal')
+    
+    # Переменные для шаблона (аналогично view_telegram)
+    user_recipient = telegram.recipients.filter(user=user).first()
+    context = {
+        'telegram': telegram,
+        'user_recipient_id': user_recipient.id if user_recipient else None,
+        'user_recipient_status': user_recipient.status if user_recipient else None,
+        'user_is_approver': user in telegram.approvers.all(),
+        'user_is_signer': user == telegram.signer,
+        'user_is_author': user == telegram.author,
+    }
+    return render(request, 'core/print_telegram.html', context)
 
 # ---------- Управление статусами ----------
 @login_required
@@ -483,15 +508,26 @@ def reset_to_draft(request):
         ids = data.get('ids', [])
         if not ids:
             return JsonResponse({'success': False, 'message': 'Не выбраны телеграммы'})
-        telegrams = Telegram.objects.filter(id__in=ids, author=request.user)
+        # Не сбрасываем телеграммы, которые уже в доставке или доставлены
+        telegrams = Telegram.objects.filter(
+            id__in=ids,
+            author=request.user
+        ).exclude(status__in=[Telegram.Status.DELIVERY, Telegram.Status.DELIVERED])
+        
         count = 0
         for tg in telegrams:
             tg.status = Telegram.Status.DRAFT
             tg.signature = None
             tg.signed_at = None
             tg.signatures.all().delete()
+            tg.approvals_received = 0
+            tg.rejection_reason = None
+            tg.rejected_by = None
+            tg.rejected_at = None
             tg.save()
             count += 1
+        if count < len(ids):
+            return JsonResponse({'success': True, 'message': f'Сброшено {count} телеграмм (доставленные и в доставке пропущены)'})
         return JsonResponse({'success': True, 'message': f'Сброшено {count} телеграмм'})
     except Exception as e:
         return JsonResponse({'success': False, 'message': str(e)})
@@ -502,11 +538,16 @@ def mass_delete(request):
         ids_str = request.POST.get('selected_ids', '')
         if ids_str:
             ids = ids_str.split(',')
-            deleted_count = Telegram.objects.filter(id__in=ids, author=request.user).delete()[0]
+            # Удаляем только черновики и отклонённые
+            deleted_count = Telegram.objects.filter(
+                id__in=ids,
+                author=request.user,
+                status__in=[Telegram.Status.DRAFT, Telegram.Status.REJECTED]
+            ).delete()[0]
             if deleted_count:
                 messages.success(request, f'Удалено {deleted_count} телеграмм.')
             else:
-                messages.warning(request, 'Не удалось удалить: возможно, вы не автор.')
+                messages.warning(request, 'Не удалось удалить: возможно, вы не автор или статус не позволяет.')
         else:
             messages.warning(request, 'Ничего не выбрано.')
     return redirect('telegram_journal')
@@ -542,7 +583,6 @@ def mass_copy(request):
             messages.warning(request, 'Ничего не выбрано.')
     return redirect('telegram_journal')
 
-# ---------- Журнал ----------
 @login_required
 def telegram_journal(request):
     # Редирект на вкладку "Создание", если параметры не указаны
@@ -566,7 +606,7 @@ def telegram_journal(request):
     else:  # USER
         telegrams = Telegram.objects.filter(Q(author=user) | Q(recipients__user=user)).distinct()
 
-    # Исключаем чужие черновики для не-USER (исправлено без union)
+    # Исключаем чужие черновики для не-USER
     if user.role != 'USER':
         telegrams = telegrams.filter(
             Q(author=user) | ~Q(status=Telegram.Status.DRAFT)
@@ -594,7 +634,6 @@ def telegram_journal(request):
             )
             telegrams = telegrams.filter(Exists(recipient_read_exists))
     elif type_filter == 'outgoing':
-    # Для оператора в доставке и доставлено – не фильтруем по автору
         if user.role == 'OPERATOR' and outgoing_stage in ('delivery', 'delivered'):
             telegrams = telegrams
         else:
@@ -627,8 +666,29 @@ def telegram_journal(request):
             ).distinct()
 
     telegrams = telegrams.order_by('-created_at')
-    paginator = Paginator(telegrams, 20)
+
+    # Параметры фильтрации без page для пагинации
+    filter_params = request.GET.copy()
+    filter_params.pop('page', None)
+
+    paginator = Paginator(telegrams, 15)   # количество на страницу
     page_obj = paginator.get_page(request.GET.get('page'))
+
+    # Функция для добавления 3 часов к строке времени
+    def add_three_hours(time_str):
+        if not time_str or time_str == '—':
+            return time_str
+        try:
+            # формат: "dd.mm.yyyy HH:MM"
+            date_part, time_part = time_str.split(' ')
+            hour = int(time_part.split(':')[0])
+            minute = time_part.split(':')[1]
+            new_hour = hour + 3
+            if new_hour >= 24:
+                new_hour -= 24
+            return f"{date_part} {new_hour:02d}:{minute}"
+        except:
+            return time_str
 
     # Подготовка данных для отображения
     for t in page_obj:
@@ -643,27 +703,52 @@ def telegram_journal(request):
         user_recipient = t.recipients.filter(user=user).first()
         t.user_recipient_id = user_recipient.id if user_recipient else None
 
-        t.recipients_status_json = json.dumps(t.get_recipients_status_list(), ensure_ascii=False)
-        t.approvers_status_json = json.dumps(t.get_approvers_status_list(), ensure_ascii=False)
-        t.signer_info_json = json.dumps(t.get_signer_info(), ensure_ascii=False) if t.signer else 'null'
-        t.rejection_data_json = json.dumps({
+        # --- recipients_status_json (с добавлением 3 часов) ---
+        recipients_status = t.get_recipients_status_list()
+        for item in recipients_status:
+            if item.get('read_at'):
+                item['read_at'] = add_three_hours(item['read_at'])
+        t.recipients_status_json = json.dumps(recipients_status, ensure_ascii=False)
+
+        # --- approvers_status_json (с добавлением 3 часов) ---
+        approvers_status = t.get_approvers_status_list()
+        for item in approvers_status:
+            if item.get('signed_at'):
+                item['signed_at'] = add_three_hours(item['signed_at'])
+        t.approvers_status_json = json.dumps(approvers_status, ensure_ascii=False)
+
+        # --- signer_info_json (с добавлением 3 часов) ---
+        if t.signer:
+            signer_info = t.get_signer_info()
+            if signer_info.get('signed_at'):
+                signer_info['signed_at'] = add_three_hours(signer_info['signed_at'])
+            t.signer_info_json = json.dumps(signer_info, ensure_ascii=False)
+        else:
+            t.signer_info_json = 'null'
+
+        # --- rejection_data_json (с добавлением 3 часов) ---
+        rejection_data = {
             'reason': t.rejection_reason,
             'rejected_by': t.rejected_by.full_name or t.rejected_by.username if t.rejected_by else None,
-            'rejected_at': t.rejected_at.strftime('%d.%m.%Y %H:%M') if t.rejected_at else None,
-        }, ensure_ascii=False)
+            'rejected_at': add_three_hours(t.rejected_at.strftime('%d.%m.%Y %H:%M')) if t.rejected_at else None,
+        }
+        t.rejection_data_json = json.dumps(rejection_data, ensure_ascii=False)
 
+        # --- для оператора: recipients_manage_json (с добавлением 3 часов) ---
         if user.role == 'OPERATOR':
             recipients_list = []
             for r in t.recipients.select_related('user__department'):
+                read_at_str = r.read_at.strftime('%d.%m.%Y %H:%M') if r.read_at else None
+                last_notified_str = r.last_notified_at.strftime('%d.%m.%Y %H:%M') if r.last_notified_at else None
                 recipients_list.append({
                     'id': r.id,
                     'full_name': r.user.full_name or r.user.username,
                     'department': r.user.department.code if r.user.department else '—',
                     'status': r.status,
-                    'read_at': r.read_at.strftime('%d.%m.%Y %H:%M') if r.read_at else None,
+                    'read_at': add_three_hours(read_at_str),
                     'delivery_method': r.delivery_method,
                     'is_notified': r.is_notified,
-                    'last_notified_at': r.last_notified_at.strftime('%d.%m.%Y %H:%M') if r.last_notified_at else None,
+                    'last_notified_at': add_three_hours(last_notified_str),
                 })
             t.recipients_manage_json = json.dumps(recipients_list, ensure_ascii=False)
 
@@ -684,6 +769,7 @@ def telegram_journal(request):
         'departments': departments,
         'user_role': user.role,
         'new_count': new_count,
+        'filter_params': filter_params,
     })
 
 # ---------- Экспорт ----------
@@ -1047,49 +1133,102 @@ def reports(request):
         messages.error(request, 'Доступ запрещён.')
         return redirect('home')
     
+    # Словарь для отображения статусов
+    STATUS_DISPLAY = {
+        'DRAFT': 'Черновик',
+        'ON_APPROVAL': 'На согласовании',
+        'APPROVED': 'Согласовано',
+        'ON_SIGNATURE': 'На подписании',
+        'SIGNED': 'Подписано',
+        'DELIVERY': 'Доставка',
+        'DELIVERED': 'Доставлено',
+        'REJECTED': 'Отказано',
+    }
+    
+    # Получение фильтров из GET
     start_date = request.GET.get('start_date')
     end_date = request.GET.get('end_date')
+    status_filter = request.GET.get('status')
+    department_id = request.GET.get('department')
+    number_filter = request.GET.get('number')
     
-    telegrams = Telegram.objects.all()
+    # Базовый QuerySet для телеграмм (с учётом прав)
+    if request.user.role == 'ADMIN':
+        telegrams = Telegram.objects.all()
+    else:  # OPERATOR
+        try:
+            zone = OperatorZone.objects.get(operator=request.user)
+            depts = zone.departments.all()
+            telegrams = Telegram.objects.filter(Q(author__department__in=depts) | Q(recipients__user__department__in=depts)).distinct()
+        except OperatorZone.DoesNotExist:
+            telegrams = Telegram.objects.none()
+    
+    # Применяем фильтры
     if start_date:
         telegrams = telegrams.filter(created_at__date__gte=start_date)
     if end_date:
         telegrams = telegrams.filter(created_at__date__lte=end_date)
+    if status_filter:
+        telegrams = telegrams.filter(status=status_filter)
+    if department_id:
+        telegrams = telegrams.filter(author__department_id=department_id)
+    if number_filter:
+        telegrams = telegrams.filter(number__icontains=number_filter)
     
-    if request.user.role == 'OPERATOR':
-        try:
-            zone = OperatorZone.objects.get(operator=request.user)
-            departments_in_zone = zone.departments.all()
-            telegrams = telegrams.filter(recipients__user__department__in=departments_in_zone).distinct()
-        except OperatorZone.DoesNotExist:
-            telegrams = Telegram.objects.none()
-    
+    # Общая статистика
     total = telegrams.count()
-    status_counts = telegrams.values('status').annotate(count=Count('status'))
-    status_dict = {item['status']: item['count'] for item in status_counts}
+    delivered_count = telegrams.filter(status=Telegram.Status.DELIVERED).count()
+    read_count = TelegramRecipient.objects.filter(telegram__in=telegrams, status='READ').values('telegram').distinct().count()
+    in_progress_count = telegrams.filter(status__in=[Telegram.Status.ON_APPROVAL, Telegram.Status.ON_SIGNATURE, Telegram.Status.DELIVERY]).count()
     
-    # Способы доставки (только для оператора) – через TelegramRecipient
-    delivery_method_counts = {}
-    if request.user.role == 'OPERATOR':
-        recipients = TelegramRecipient.objects.filter(
-            telegram__in=telegrams,
-            delivery_method__isnull=False
-        )
-        if start_date:
-            recipients = recipients.filter(telegram__created_at__date__gte=start_date)
-        if end_date:
-            recipients = recipients.filter(telegram__created_at__date__lte=end_date)
-        method_counts = recipients.values('delivery_method').annotate(count=Count('delivery_method'))
-        for item in method_counts:
-            delivery_method_counts[item['delivery_method']] = item['count']
+    # Распределение по статусам (для круговой диаграммы)
+    status_counts_qs = telegrams.values('status').annotate(count=Count('status'))
+    status_labels = [STATUS_DISPLAY.get(item['status'], item['status']) for item in status_counts_qs]
+    status_data = [item['count'] for item in status_counts_qs]
+    
+    # Словарь статусов для отображения под диаграммой (статус → количество)
+    status_counts = {STATUS_DISPLAY.get(item['status'], item['status']): item['count'] for item in status_counts_qs}
+    
+    # Динамика по дням (последние 30 дней или за период)
+    if start_date and end_date:
+        date_start = datetime.strptime(start_date, '%Y-%m-%d').date()
+        date_end = datetime.strptime(end_date, '%Y-%m-%d').date()
+        delta = (date_end - date_start).days + 1
+    else:
+        date_end = timezone.now().date()
+        date_start = date_end - timedelta(days=30)
+        delta = 31
+    
+    from django.db.models.functions import TruncDate
+    daily_stats = telegrams.filter(created_at__date__gte=date_start, created_at__date__lte=date_end) \
+                           .annotate(date=TruncDate('created_at')) \
+                           .values('date').annotate(cnt=Count('id')).order_by('date')
+    daily_labels = [stat['date'].strftime('%d.%m') for stat in daily_stats]
+    daily_counts = [stat['cnt'] for stat in daily_stats]
+    
+    # Пагинация для детального списка
+    from django.core.paginator import Paginator
+    paginator = Paginator(telegrams.order_by('-created_at'), 20)
+    page_number = request.GET.get('page')
+    telegrams_page = paginator.get_page(page_number)
+    
+    # Для фильтра "Подразделение" в форме
+    departments = Department.objects.all()
     
     context = {
         'total': total,
-        'status_counts': status_dict,
-        'method_counts': delivery_method_counts,
+        'delivered_count': delivered_count,
+        'read_count': read_count,
+        'in_progress_count': in_progress_count,
+        'status_counts': status_counts,
+        'status_labels': status_labels,
+        'status_data': status_data,
+        'daily_labels': daily_labels,
+        'daily_counts': daily_counts,
+        'telegrams_page': telegrams_page,
+        'departments': departments,
         'start_date': start_date,
         'end_date': end_date,
-        'role': request.user.role,
     }
     return render(request, 'core/reports.html', context)
 

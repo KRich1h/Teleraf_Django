@@ -155,16 +155,22 @@
             <ul class="navbar-nav ms-auto">
                 <li class="nav-item"><a class="nav-link" href="{% url 'home' %}"><i class="bi bi-house"></i> Главная</a></li>
                 <li class="nav-item"><a class="nav-link" href="{% url 'telegram_journal' %}"><i class="bi bi-list-ul"></i> Журнал</a></li>
-                {% if request.user.role == 'OPERATOR' %}
-                <li class="nav-item"><a class="nav-link" href="{% url 'operator_dashboard' %}"><i class="bi bi-person-badge"></i> Оператору</a></li>
-                {% endif %}
+
+                <!-- Пункт "Оператору" полностью убран -->
+                {# % if request.user.role == 'OPERATOR' % #}
+                <!-- <li class="nav-item"><a class="nav-link" href="{% url 'operator_dashboard' %}"><i class="bi bi-person-badge"></i> Оператору</a></li> -->
+                {# % endif % #}
+
                 {% if request.user.role == 'ADMIN' or request.user.role == 'OPERATOR' %}
                 <li class="nav-item"><a class="nav-link" href="{% url 'reports' %}"><i class="bi bi-graph-up"></i> Отчёты</a></li>
                 {% endif %}
+
                 <li class="nav-item"><a class="nav-link" href="{% url 'profile' %}"><i class="bi bi-person"></i> Личный кабинет</a></li>
+
                 {% if request.user.role == 'ADMIN' %}
-                <li class="nav-item"><a class="nav-link" href="/admin/"><i class="bi bi-shield-lock"></i> Админка</a></li>
+                <li class="nav-item"><a class="nav-link" href="/admin/"><i class="bi bi-shield-lock"></i> Админ</a></li>
                 {% endif %}
+
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" id="nsidropdown" role="button" data-bs-toggle="dropdown"><i class="bi bi-database"></i> НСИ</a>
                     <ul class="dropdown-menu">
@@ -172,6 +178,7 @@
                         <li><a class="dropdown-item" href="{% url 'operatorzone_list' %}">Зоны операторов</a></li>
                     </ul>
                 </li>
+
                 <li class="nav-item">
                     <form method="post" action="{% url 'logout' %}" style="display: inline;">
                         {% csrf_token %}

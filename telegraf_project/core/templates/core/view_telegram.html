@@ -31,7 +31,7 @@
             <div class="row mb-3">
                 <div class="col-md-2 fw-bold">Согласование:</div>
                 <div class="col-md-9">
-                    Прогресс: {{ telegram.approvals_received }}/{{ telegram.approvers.count }}
+                    Согласующих: {{ telegram.approvals_received }}/{{ telegram.approvers.count }}
                     {% if telegram.status == 'ON_APPROVAL' and user in telegram.approvers.all %}
                         <span class="text-warning ms-2">(ожидает вашего согласования)</span>
                     {% endif %}
@@ -71,18 +71,18 @@
             <div class="d-flex gap-2 justify-content-end">
                 {# --- Прочтение (только если статус получателя PENDING) --- #}
                 {% if telegram.status == 'DELIVERY' and user_recipient_id and user_recipient_status == 'PENDING' %}
-                    <a href="{% url 'mark_as_read_and_view' user_recipient_id %}" class="btn btn-success">✓ Прочитано</a>
-                    <a href="{% url 'telegram_journal' %}" class="btn btn-secondary">× Отмена</a>
+                    <a href="{% url 'mark_as_read_and_view' user_recipient_id %}" class="btn btn-success">Ознакомиться</a>
+                    <a href="{% url 'telegram_journal' %}" class="btn btn-secondary">Отмена</a>
 
                 {# --- Согласование --- #}
                 {% elif telegram.status == 'ON_APPROVAL' and user in telegram.approvers.all %}
-                    <a href="{% url 'approve_telegram' telegram.id %}" class="btn btn-success">✓ Согласовать</a>
-                    <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#rejectModal" data-id="{{ telegram.id }}">✗ Отказать</button>
+                    <a href="{% url 'approve_telegram' telegram.id %}" class="btn btn-success">Согласовать</a>
+                    <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#rejectModal" data-id="{{ telegram.id }}">Отказать</button>
 
                 {# --- Подпись --- #}
                 {% elif telegram.status == 'ON_SIGNATURE' and user == telegram.signer %}
-                    <a href="{% url 'sign_telegram' telegram.id %}" class="btn btn-success">✍ Подписать</a>
-                    <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#rejectModal" data-id="{{ telegram.id }}">✗ Отказать</button>
+                    <a href="{% url 'sign_telegram' telegram.id %}" class="btn btn-success">Подписать</a>
+                    <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#rejectModal" data-id="{{ telegram.id }}">Отказать</button>
 
                 {# --- Для автора (черновик, после согласования, после подписи) --- #}
                 {% elif telegram.status == 'DRAFT' and request.user == telegram.author %}

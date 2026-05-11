@@ -69,9 +69,11 @@
 </style>
 
 <div style="display: flex; min-height: calc(100vh - 120px);">
-    <!-- Левая панель кнопок (без изменений) -->
+    <!-- Левая панель кнопок -->
     <div class="left-panel">
-        <button class="action-btn" id="toggleFilterBtn" title="Фильтры" data-bs-toggle="tooltip" data-bs-placement="right"><i class="bi bi-funnel"></i></button>
+        <button class="action-btn" data-bs-toggle="modal" data-bs-target="#filterModal" title="Фильтры">
+            <i class="bi bi-funnel"></i>
+        </button>
         <a href="{% url 'create_telegram_page' %}" class="action-btn" title="Создание" data-bs-toggle="tooltip" data-bs-placement="right"><i class="bi bi-plus-circle"></i></a>
         <button class="action-btn" id="viewSelectedBtn" title="Просмотр" data-bs-toggle="tooltip" data-bs-placement="right"><i class="bi bi-eye"></i></button>
         <button class="action-btn" id="sendSelectedBtn" title="Отправка" data-bs-toggle="tooltip" data-bs-placement="right"><i class="bi bi-send"></i></button>
@@ -83,22 +85,6 @@
     </div>
 
     <div class="main-area">
-        <!-- Фильтры (скрытые) -->
-        <div class="collapse" id="filterCollapse">
-            <div class="bg-light p-3 rounded mb-3">
-                <form method="get" id="filterForm" class="row g-3">
-                    <div class="col-md-3"><label class="form-label small">{{ form.start_date.label }}</label>{{ form.start_date }}</div>
-                    <div class="col-md-3"><label class="form-label small">{{ form.end_date.label }}</label>{{ form.end_date }}</div>
-                    <div class="col-md-2"><label class="form-label small">{{ form.number.label }}</label>{{ form.number }}</div>
-                    <div class="col-md-2"><label class="form-label small">{{ form.department.label }}</label>{{ form.department }}</div>
-                    <div class="col-md-2 d-flex gap-2 align-items-end">
-                        <button type="submit" class="btn btn-sm btn-primary w-100">Фильтр</button>
-                        <a href="{% url 'telegram_journal' %}" class="btn btn-sm btn-secondary w-100">Сброс</a>
-                    </div>
-                </form>
-            </div>
-        </div>
-
         <!-- Карточки Входящие / Исходящие -->
         <div style="display: flex; gap: 20px;">
             <div class="filter-card" style="flex:1;">
@@ -123,7 +109,7 @@
         <div class="info-bar"><div class="total-count">📊 Всего телеграмм: {{ page_obj.paginator.count }}</div></div>
 
         <div class="table-wrapper">
-            <form id="telegramForm" method="post">
+            <form id="telegramForm" method="post" action="{% url 'mass_delete' %}">
                 {% csrf_token %}
                 <table class="journal-table">
                     <thead>
@@ -139,7 +125,7 @@
                     </thead>
                     <tbody>
                         {% for tg in page_obj %}
-                        <tr data-id="{{ tg.id }}" class="telegram-row">
+                        <tr data-id="{{ tg.id }}" data-status="{{ tg.status }}" class="telegram-row">
                             <td><strong>ТГ-{{ tg.id }}</strong><br><span style="font-size:0.7rem;">{{ tg.created_at|date:"d.m.Y H:i" }}</span></td>
                             <td>{{ tg.author.department.code|default:tg.author_department|default:tg.author.full_name|default:tg.author.username }}</td>
                             <td><i class="bi bi-people-fill recipient-icon" data-recipients='{{ tg.recipient_departments|join:"||" }}' onclick="showRecipients(this)"></i></td>
@@ -182,7 +168,7 @@
                             <td>{{ tg.author.full_name|default:tg.author.username }}</td>
                         </tr>
                         {% empty %}
-                        <td><td colspan="7" class="text-center py-4">Нет телеграмм</td></table>
+                        <tr><td colspan="7" class="text-center py-4">Нет телеграмм</td></tr>
                         {% endfor %}
                     </tbody>
                 </table>
@@ -190,15 +176,77 @@
             </form>
         </div>
 
-        {% if page_obj.has_other_pages %}
-        <nav><ul class="pagination justify-content-center">
-            {% if page_obj.has_previous %}<li class="page-item"><a class="page-link" href="?page=1&{{ request.GET.urlencode }}">Первая</a></li>
-            <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&{{ request.GET.urlencode }}">Предыдущая</a></li>{% endif %}
-            <li class="page-item active"><span class="page-link">{{ page_obj.number }} / {{ page_obj.paginator.num_pages }}</span></li>
-            {% if page_obj.has_next %}<li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&{{ request.GET.urlencode }}">Следующая</a></li>
-            <li class="page-item"><a class="page-link" href="?page={{ page_obj.paginator.num_pages }}&{{ request.GET.urlencode }}">Последняя</a></li>{% endif %}
-        </ul></nav>
+                {% if page_obj.paginator.num_pages > 1 %}
+        <nav>
+            <ul class="pagination justify-content-center">
+                {% if page_obj.has_previous %}
+                <li class="page-item"><a class="page-link" href="?page={{ page_obj.previous_page_number }}&{{ filter_params.urlencode }}">&laquo;</a></li>
+                {% else %}
+                <li class="page-item disabled"><span class="page-link">&laquo;</span></li>
+                {% endif %}
+
+                {% for i in page_obj.paginator.page_range %}
+                    {% if i == page_obj.number %}
+                        <li class="page-item active"><span class="page-link">{{ i }}</span></li>
+                    {% else %}
+                        <li class="page-item"><a class="page-link" href="?page={{ i }}&{{ filter_params.urlencode }}">{{ i }}</a></li>
+                    {% endif %}
+                {% endfor %}
+
+                {% if page_obj.has_next %}
+                <li class="page-item"><a class="page-link" href="?page={{ page_obj.next_page_number }}&{{ filter_params.urlencode }}">&raquo;</a></li>
+                {% else %}
+                <li class="page-item disabled"><span class="page-link">&raquo;</span></li>
+                {% endif %}
+            </ul>
+        </nav>
         {% endif %}
+    </div>
+</div>
+
+<!-- Модальное окно фильтров -->
+<div class="modal fade" id="filterModal" tabindex="-1" aria-labelledby="filterModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="filterModalLabel"><i class="bi bi-funnel"></i> Фильтры</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Закрыть"></button>
+            </div>
+            <form method="get" id="filterFormModal">
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label small">{{ form.start_date.label }}</label>
+                            {{ form.start_date }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small">{{ form.end_date.label }}</label>
+                            {{ form.end_date }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small">{{ form.number.label }}</label>
+                            {{ form.number }}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small">{{ form.department.label }}</label>
+                            {{ form.department }}
+                        </div>
+                    </div>
+                    <input type="hidden" name="type" value="{{ request.GET.type }}">
+                    {% if request.GET.status %}
+                        <input type="hidden" name="status" value="{{ request.GET.status }}">
+                    {% endif %}
+                    {% if request.GET.stage %}
+                        <input type="hidden" name="stage" value="{{ request.GET.stage }}">
+                    {% endif %}
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" class="btn btn-warning" id="resetFiltersBtn">Сбросить</button>
+                    <button type="submit" class="btn btn-primary">Применить фильтр</button>
+                </div>
+            </form>
+        </div>
     </div>
 </div>
 
@@ -211,35 +259,33 @@
     </div>
 </div>
 
-<!-- Модальное окно для статуса прочтения (обычные пользователи) -->
+<!-- Статус прочтения -->
 <div class="modal fade" id="statusModal" tabindex="-1" aria-labelledby="statusModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg">
         <div class="modal-content">
             <div class="modal-header"><h5 class="modal-title">Статус прочтения</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
-            <div class="modal-body">
-                <table class="table table-bordered table-sm"><thead><tr><th>Отдел</th><th>Получатель</th><th>Статус</th><th>Дата прочтения</th></tr></thead><tbody id="statusModalBody"></tbody></table>
-            </div>
+            <div class="modal-body"><table class="table table-bordered table-sm"><thead><tr><th>Отдел</th><th>Получатель</th><th>Статус</th><th>Дата прочтения</th></tr></thead><tbody id="statusModalBody"></tbody></table></div>
             <div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button></div>
         </div>
     </div>
 </div>
 
-<!-- Модальное окно для согласующих -->
+<!-- Согласующие -->
 <div class="modal fade" id="approversModal" tabindex="-1" aria-labelledby="approversModalLabel" aria-hidden="true">
     <div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Согласующие</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><table class="table table-bordered table-sm"><thead><tr><th>Отдел</th><th>Сотрудник</th><th>Статус</th><th>Дата согласования</th></tr></thead><tbody id="approversModalBody"></tbody></table></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button></div></div></div>
 </div>
 
-<!-- Модальное окно для подписанта -->
+<!-- Подписант -->
 <div class="modal fade" id="signerModal" tabindex="-1" aria-labelledby="signerModalLabel" aria-hidden="true">
     <div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Подписант</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><div id="signerModalBody"></div></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button></div></div></div>
 </div>
 
-<!-- Модальное окно для причины отказа -->
+<!-- Причина отказа -->
 <div class="modal fade" id="rejectReasonModal" tabindex="-1" aria-labelledby="rejectReasonModalLabel" aria-hidden="true">
     <div class="modal-dialog"><div class="modal-content"><div class="modal-header"><h5 class="modal-title">Причина отказа</h5><button type="button" class="btn-close" data-bs-dismiss="modal"></button></div><div class="modal-body"><p><strong>Причина:</strong> <span id="rejectReasonText"></span></p><p><strong>Отказал:</strong> <span id="rejectedByText"></span></p><p><strong>Дата отказа:</strong> <span id="rejectedAtText"></span></p></div><div class="modal-footer"><button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button></div></div></div>
 </div>
 
-<!-- Модальное окно для управления доставкой (оператор) -->
+<!-- Управление доставкой -->
 <div class="modal fade" id="manageModal" tabindex="-1" aria-labelledby="manageModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-xl">
         <div class="modal-content">
@@ -297,6 +343,32 @@
     });
     function getSelectedIds() { return Array.from(selected); }
 
+    // Проверки для кнопок
+    function hasDeliveryOrDeliveredSelected() {
+        const selectedRows = document.querySelectorAll('.telegram-row.selected');
+        for (let row of selectedRows) {
+            const status = row.getAttribute('data-status');
+            if (status === 'DELIVERY' || status === 'DELIVERED') return true;
+        }
+        return false;
+    }
+
+    function hasEditableSelected() {
+        const selectedRows = document.querySelectorAll('.telegram-row.selected');
+        if (selectedRows.length !== 1) return false;
+        const status = selectedRows[0].getAttribute('data-status');
+        return (status === 'DRAFT' || status === 'REJECTED');
+    }
+
+    function hasDeletableSelected() {
+        const selectedRows = document.querySelectorAll('.telegram-row.selected');
+        for (let row of selectedRows) {
+            const status = row.getAttribute('data-status');
+            if (status !== 'DRAFT' && status !== 'REJECTED') return false;
+        }
+        return selectedRows.length > 0;
+    }
+
     // Адресаты
     window.showRecipients = function(element) {
         let recipientsStr = element.getAttribute('data-recipients') || '';
@@ -311,7 +383,7 @@
     window.closeModal = function() { document.getElementById('recipientModal').style.display = 'none'; }
     window.onclick = function(event) { if (event.target === document.getElementById('recipientModal')) closeModal(); }
 
-    // Статус прочтения (обычные пользователи)
+    // Статус прочтения
     const statusModal = document.getElementById('statusModal');
     if (statusModal) {
         statusModal.addEventListener('show.bs.modal', function (event) {
@@ -326,11 +398,7 @@
                         data.forEach(item => {
                             const statusText = item.status === 'READ' ? '<span class="badge bg-success">Прочитано</span>' : '<span class="badge bg-secondary">Ожидает</span>';
                             const readDate = item.read_at ? item.read_at : '—';
-                            rows += `<td>${escapeHtml(item.department)}</td>
-                                        <td>${escapeHtml(item.full_name)}</td>
-                                        <td>${statusText}</td>
-                                        <td>${escapeHtml(readDate)}</td>
-                                    `;
+                            rows += `<tr><td>${escapeHtml(item.department)}</td><td>${escapeHtml(item.full_name)}</td><td>${statusText}</td><td>${escapeHtml(readDate)}</td></tr>`;
                         });
                         tbody.innerHTML = rows;
                     } else { tbody.innerHTML = '<tr><td colspan="4" class="text-center">Нет получателей</td></tr>'; }
@@ -354,11 +422,7 @@
                         data.forEach(item => {
                             const statusText = item.status === 'APPROVED' ? '<span class="badge bg-success">Согласовано</span>' : '<span class="badge bg-secondary">Ожидает</span>';
                             const date = item.signed_at ? item.signed_at : '—';
-                            rows += `<td>${escapeHtml(item.department)}</td>
-                                        <td>${escapeHtml(item.full_name)}</td>
-                                        <td>${statusText}</td>
-                                        <td>${escapeHtml(date)}</td>
-                                    `;
+                            rows += `<tr><td>${escapeHtml(item.department)}</td><td>${escapeHtml(item.full_name)}</td><td>${statusText}</td><td>${escapeHtml(date)}</td></tr>`;
                         });
                         tbody.innerHTML = rows;
                     } else { tbody.innerHTML = '<tr><td colspan="4" class="text-center">Нет согласующих</td></tr>'; }
@@ -406,7 +470,7 @@
         });
     }
 
-    // Управление доставкой (оператор)
+    // Управление доставкой
     const manageModal = document.getElementById('manageModal');
     if (manageModal) {
         manageModal.addEventListener('show.bs.modal', function (event) {
@@ -425,7 +489,6 @@
                     return;
                 }
                 let html = '';
-                // Для DELIVERED показываем только 5 колонок
                 if (telegramStatus === 'DELIVERED') {
                     recipients.forEach(rec => {
                         const statusBadge = rec.status === 'READ' ? '<span class="badge bg-success">Прочитано</span>' : '<span class="badge bg-secondary">Ожидает</span>';
@@ -438,11 +501,8 @@
                             <td>${notifiedInfo}</td>
                         </tr>`;
                     });
-                    document.querySelector('#manageModal .modal-body table thead').innerHTML = `<tr>
-                        <th>Отдел</th><th>Получатель</th><th>Статус</th><th>Дата прочтения</th><th>Уведомлён</th>
-                    </tr>`;
+                    document.querySelector('#manageModal .modal-body table thead').innerHTML = `<tr><th>Отдел</th><th>Получатель</th><th>Статус</th><th>Дата прочтения</th><th>Уведомлён</th></tr>`;
                 } else {
-                    // Для DELIVERY показываем полную таблицу с управлением
                     recipients.forEach(rec => {
                         const statusBadge = rec.status === 'READ' ? '<span class="badge bg-success">Прочитано</span>' : '<span class="badge bg-secondary">Ожидает</span>';
                         const notifiedBadge = rec.is_notified ? `<span class="badge bg-info">Уведомлён ${rec.last_notified_at || ''}</span>` : '—';
@@ -464,12 +524,9 @@
                             <td>${actions}</td>
                         </tr>`;
                     });
-                    document.querySelector('#manageModal .modal-body table thead').innerHTML = `<tr>
-                        <th>Отдел</th><th>Получатель</th><th>Статус</th><th>Дата прочтения</th><th>Уведомлён</th><th>Способ уведомления</th><th>Действия</th>
-                    </tr>`;
+                    document.querySelector('#manageModal .modal-body table thead').innerHTML = `<tr><th>Отдел</th><th>Получатель</th><th>Статус</th><th>Дата прочтения</th><th>Уведомлён</th><th>Способ уведомления</th><th>Действия</th></tr>`;
                 }
                 tbody.innerHTML = html;
-                // Привязываем обработчики только для DELIVERY (они уже есть, но нужно перепривязать)
                 if (telegramStatus !== 'DELIVERED') {
                     document.querySelectorAll('.notify-btn').forEach(btn => {
                         btn.addEventListener('click', function() {
@@ -498,13 +555,79 @@
         });
     }
 
+    // Логика фильтров
+    const filterForm = document.getElementById('filterFormModal');
+    const resetFiltersBtn = document.getElementById('resetFiltersBtn');
+    if (resetFiltersBtn) {
+        resetFiltersBtn.addEventListener('click', function() {
+            filterForm.querySelectorAll('input:not([type="hidden"]), select').forEach(field => {
+                if (field.type !== 'submit' && field.type !== 'button') {
+                    field.value = '';
+                }
+            });
+            const deptSelect = filterForm.querySelector('select[name="department"]');
+            if (deptSelect) deptSelect.value = '';
+            filterForm.submit();
+        });
+    }
+
     // Действия левой панели
-    document.getElementById('toggleFilterBtn')?.addEventListener('click', () => document.getElementById('filterCollapse')?.classList.toggle('show'));
     document.getElementById('viewSelectedBtn')?.addEventListener('click', () => { const ids = getSelectedIds(); if (ids.length !== 1) alert('Выберите одну телеграмму'); else window.location.href = `/telegram/${ids[0]}/`; });
     document.getElementById('sendSelectedBtn')?.addEventListener('click', () => { const ids = getSelectedIds(); if (ids.length === 0) alert('Выберите телеграммы'); else if (confirm(`Отправить выбранные телеграммы (${ids.length})?`)) fetch("{% url 'send_telegram' %}", { method: 'POST', headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: ids }) }).then(res => res.json()).then(data => { alert(data.message); if (data.success) location.reload(); }).catch(() => alert('Ошибка')); });
-    document.getElementById('editSelectedBtn2')?.addEventListener('click', () => { const ids = getSelectedIds(); if (ids.length !== 1) alert('Выберите одну телеграмму'); else window.location.href = `/edit/${ids[0]}/`; });
-    document.getElementById('resetToDraftBtn')?.addEventListener('click', () => { const ids = getSelectedIds(); if (ids.length === 0) alert('Выберите телеграммы'); else if (confirm(`Сбросить выбранные телеграммы (${ids.length}) в черновик?`)) fetch("{% url 'reset_to_draft' %}", { method: 'POST', headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: ids }) }).then(res => res.json()).then(data => { alert(data.message); if (data.success) location.reload(); }); });
-    document.getElementById('deleteSelectedBtn2')?.addEventListener('click', () => { if (getSelectedIds().length && confirm('Удалить выбранные?')) document.getElementById('telegramForm').submit(); });
+    
+    // Редактирование
+    document.getElementById('editSelectedBtn2')?.addEventListener('click', () => {
+        const ids = getSelectedIds();
+        if (ids.length !== 1) {
+            alert('Выберите одну телеграмму для редактирования');
+            return;
+        }
+        if (!hasEditableSelected()) {
+            alert('Редактировать можно только телеграммы в статусе "Черновик" или "Отказано"');
+            return;
+        }
+        window.location.href = `/edit/${ids[0]}/`;
+    });
+    
+    // Сброс в черновик
+    document.getElementById('resetToDraftBtn')?.addEventListener('click', () => {
+        const ids = getSelectedIds();
+        if (ids.length === 0) {
+            alert('Выберите телеграммы');
+            return;
+        }
+        if (hasDeliveryOrDeliveredSelected()) {
+            alert('Нельзя сбросить в черновик телеграммы, находящиеся в доставке или уже доставленные!');
+            return;
+        }
+        if (confirm(`Сбросить выбранные телеграммы (${ids.length}) в черновик?`)) {
+            fetch("{% url 'reset_to_draft' %}", {
+                method: 'POST',
+                headers: { 'X-CSRFToken': '{{ csrf_token }}', 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids: ids })
+            }).then(res => res.json()).then(data => {
+                alert(data.message);
+                if (data.success) location.reload();
+            }).catch(() => alert('Ошибка'));
+        }
+    });
+    
+    // Удаление
+    document.getElementById('deleteSelectedBtn2')?.addEventListener('click', () => {
+        const ids = getSelectedIds();
+        if (ids.length === 0) {
+            alert('Выберите телеграммы');
+            return;
+        }
+        if (!hasDeletableSelected()) {
+            alert('Удалять можно только телеграммы в статусе "Черновик" или "Отказано"!');
+            return;
+        }
+        if (confirm(`Удалить выбранные телеграммы (${ids.length})?`)) {
+            document.getElementById('telegramForm').submit();
+        }
+    });
+    
     document.getElementById('printSelectedBtn2')?.addEventListener('click', () => { const ids = getSelectedIds(); if (ids.length !== 1) alert('Выберите одну телеграмму'); else window.open(`/print/${ids[0]}/`, '_blank'); });
 
     var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
